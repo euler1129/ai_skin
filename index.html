@@ -1570,6 +1570,7 @@ function triggerCamera() {
       currentImageData = e.target.result;
       const img = document.getElementById('preview-img');
       img.src = currentImageData;
+      img.style.display = 'block';  // 确保显示（覆盖可能的内联display:none）
       document.getElementById('camera-area').classList.add('has-image');
       document.getElementById('analyze-btn').disabled = false;
       document.getElementById('scan-status').textContent = '已拍照，点击"开始AI分析"';
@@ -1596,6 +1597,7 @@ function handleFileUpload(event) {
     currentImageData = e.target.result;
     const img = document.getElementById('preview-img');
     img.src = currentImageData;
+    img.style.display = 'block';  // 确保显示（覆盖可能的内联display:none）
     document.getElementById('camera-area').classList.add('has-image');
     document.getElementById('analyze-btn').disabled = false;
     document.getElementById('scan-status').textContent = '已上传照片，点击"开始AI分析"';

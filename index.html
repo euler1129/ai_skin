@@ -1081,7 +1081,7 @@
       <span>TIANHE SMART CITY</span>
     </div>
   </div>
-  <div class="header-tag">TensorFlow.js</div>
+  <!-- <div class="header-tag">TensorFlow.js</div> -->
 </div>
 
 <div class="main-container">
@@ -1167,6 +1167,7 @@
           <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFileUpload(event)">
           
           <!-- 移动端专用：拍照按钮 -->
+          <!--
           <div class="upload-buttons" id="upload-buttons" style="display:none; margin-top: -20px;">
             <button class="upload-btn capture-btn" onclick="triggerCamera()">
               <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/></svg>
@@ -1177,6 +1178,7 @@
               📁 从相册选择
             </button>
           </div>
+          -->
           <button class="scan-analyze-btn" id="analyze-btn" onclick="startAnalysis()" disabled>
             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
             开始AI分析
@@ -1548,7 +1550,7 @@ function triggerCamera() {
       img.src = currentImageData;
       document.getElementById('camera-area').classList.add('has-image');
       document.getElementById('analyze-btn').disabled = false;
-      document.getElementById('scan-status').textContent = '已识别到人脸，点击"开始AI分析"';
+      document.getElementById('scan-status').textContent = '已拍照，点击"开始AI分析"';
       
       // 自动检测人脸
       detectAndHighlight();
@@ -1574,8 +1576,12 @@ function handleFileUpload(event) {
     img.src = currentImageData;
     document.getElementById('camera-area').classList.add('has-image');
     document.getElementById('analyze-btn').disabled = false;
+    document.getElementById('scan-status').textContent = '已上传照片，点击"开始AI分析"';
   };
   reader.readAsDataURL(file);
+  
+  // 重置 file input，允许重复选择同一文件
+  event.target.value = '';
 }
 
 // ===== Analysis =====

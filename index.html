@@ -1298,29 +1298,37 @@ async function callFacePlusAPI(imageBase64) {
     throw new Error('DEMO_MODE');
   }
 
-  // 构建 FormData
+  // 构建 FormData - 注意：return_attributes 是逗号分隔的字符串，不是数组
   const formData = new FormData();
   formData.append('api_key', apiKey);
   formData.append('api_secret', apiSecret);
   formData.append('image_base64', imageBase64);
   formData.append('return_landmark', '1');
-  formData.append('return_attributes', 'skinstatus,eyestatus,mouthstatus,smile,facequality,ethnicity,age,gender,skincolor');
+  // return_attributes 必须是逗号分隔的字符串
+  formData.append('return_attributes', 'gender,age,smiling,headpose,facequality,blur,eyestatus,emotion,ethnicity,beauty,mouthstatus,eyegaze,skinstatus');
 
   try {
-    const response = await fetch(`${baseUrl}/face/analyze`, {
+    // 正确的端点是 /detect，不是 /face/analyze
+    const response = await fetch(`${baseUrl}/detect`, {
       method: 'POST',
       body: formData
     });
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Face++ API Error:', errorText);
+    const data = await response.json();
+    
+    if (!response.ok || data.error_message) {
+      console.error('Face++ API Error:', data);
       throw new Error('API_ERROR');
     }
     
-    return await response.json();
+    // 如果没有检测到人脸
+    if (!data.faces || data.faces.length === 0) {
+      throw new Error('NO_FACE_DETECTED');
+    }
+    
+    return data;
   } catch (error) {
-    if (error.message === 'DEMO_MODE') {
+    if (error.message === 'DEMO_MODE' || error.message === 'NO_FACE_DETECTED') {
       throw error;
     }
     console.error('Network Error:', error);
@@ -1330,34 +1338,40 @@ async function callFacePlusAPI(imageBase64) {
 
 function convertFacePPToSkinData(faceData) {
   // 从 Face++ 返回的数据中提取皮肤相关指标
-  const skinstatus = faceData.faces[0]?.attributes?.skinstatus || {};
-  const facequality = faceData.faces[0]?.face_quality?.value || 60;
+  const attrs = faceData.faces[0]?.attributes || {};
+  const skinstatus = attrs.skinstatus || {};
+  const facequality = attrs.facequality?.value || 60;
   
-  // 根据 Face++ 肤色分析转换为我们的评分系统
-  const skincolor = faceData.faces[0]?.attributes?.skincolor || {};
+  // Face++ skinstatus 返回的是百分比值 (0-100)
+  // skin_health: 健康度 (越高越好)
+  // skin_acne: 痘痘程度 (越低越好)
+  // skin_stain: 斑点程度 (越低越好)
+  // skin_dark_circle: 黑眼圈程度 (越低越好)
   
-  // 计算水分含量 (基于皮肤光泽度和清晰度)
-  const brightness = skinstatus.uv || 50;
-  const moisture = Math.min(95, Math.max(30, 50 + brightness * 0.3 + (100 - facequality) * 0.2));
+  // 计算水分含量: 基于健康度
+  const health = skinstatus.skin_health || 50;
+  const moisture = Math.min(95, Math.max(30, health * 0.6 + 20));
   
-  // 计算油脂分泌 (基于面部反光区域)
-  const oiliness = skinstatus.occlusion || 40;
-  const oil = Math.min(90, Math.max(20, 40 + oiliness * 0.3));
+  // 计算油脂分泌: 基于健康度和模糊度
+  const blur = attrs.blur?.value || 50;
+  const oil = Math.min(90, Math.max(20, 50 - health * 0.2 + blur * 0.15));
   
-  // 计算毛孔状态 (基于面部清晰度)
-  const poreScore = Math.min(100, facequality * 0.8 + Math.random() * 20);
+  // 计算毛孔状态: 基于面部质量和健康度
+  const poreScore = Math.min(100, facequality * 0.6 + health * 0.3 + Math.random() * 10);
   const pore = Math.round(Math.max(10, 100 - poreScore));
   
-  // 计算色素沉着 (基于肤色均匀度)
-  const pigment = Math.round(Math.max(10, Math.min(80, 40 + (100 - skinstatus.brightness) * 0.2)));
+  // 计算色素沉着: 基于斑点
+  const stain = skinstatus.skin_stain || 40;
+  const pigment = Math.round(Math.max(10, Math.min(80, stain * 1.2)));
   
-  // 计算皱纹 (基于年龄和面部质量)
-  const age = faceData.faces[0]?.attributes?.age?.value || 30;
-  const wrinkle = Math.round(Math.min(80, age * 0.8 + (100 - facequality) * 0.3));
+  // 计算皱纹: 基于年龄
+  const age = attrs.age?.value || 30;
+  const wrinkle = Math.round(Math.min(80, age * 0.9 + (100 - facequality) * 0.2));
   
-  // 计算敏感程度 (基于遮挡情况)
-  const occlusion = skinstatus.occlusion || 30;
-  const sensitive = Math.round(Math.min(70, occlusion * 0.8 + Math.random() * 15));
+  // 计算敏感程度: 基于痘痘和黑眼圈
+  const acne = skinstatus.skin_acne || 30;
+  const darkCircle = skinstatus.skin_dark_circle || 30;
+  const sensitive = Math.round(Math.min(70, (acne + darkCircle) * 0.5 + Math.random() * 10));
   
   return {
     moisture: Math.round(moisture),
@@ -1367,8 +1381,16 @@ function convertFacePPToSkinData(faceData) {
     wrinkle: wrinkle,
     sensitive: sensitive,
     age: age,
-    ethnicity: faceData.faces[0]?.attributes?.ethnicity || 'asian',
-    gender: faceData.faces[0]?.attributes?.gender?.value || 'Male'
+    ethnicity: attrs.ethnicity?.value || 'asian',
+    gender: attrs.gender?.value || 'Male',
+    // 原始数据供参考
+    _raw: {
+      skin_health: skinstatus.skin_health,
+      skin_acne: skinstatus.skin_acne,
+      skin_stain: skinstatus.skin_stain,
+      skin_dark_circle: skinstatus.skin_dark_circle,
+      beauty: attrs.beauty?.value
+    }
   };
 }
 
@@ -1479,6 +1501,8 @@ async function startAnalysis() {
       showToast('API调用失败，请检查凭证是否正确');
     } else if (error.message === 'NETWORK_ERROR') {
       showToast('网络连接失败，请检查网络后重试');
+    } else if (error.message === 'NO_FACE_DETECTED') {
+      showToast('未检测到人脸，请上传清晰的面部照片');
     } else {
       showToast('分析过程出现问题，请重试');
     }

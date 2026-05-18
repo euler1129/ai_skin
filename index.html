@@ -1314,6 +1314,9 @@
 
 </div>
 
+<!-- 分享图片生成Canvas -->
+<canvas id="share-canvas" style="display:none"></canvas>
+
 <!-- Toast -->
 <div class="toast" id="toast">
   <span id="toast-icon">✓</span>
@@ -1924,8 +1927,236 @@ function animateNumber(el, from, to, duration) {
 }
 
 // ===== Share =====
-function shareReport(platform) {
-  showToast('报告已准备好！请截图保存或长按报告图片分享');
+async function shareReport(platform) {
+  if (!scanData) {
+    showToast('请先生成报告');
+    return;
+  }
+
+  showToast('正在生成分享图片...');
+
+  try {
+    const canvas = document.getElementById('share-canvas');
+    const ctx = canvas.getContext('2d');
+    const d = scanData;
+
+    // 设置画布尺寸（竖版海报 9:16，宽度400px）
+    const canvasWidth = 400;
+    const canvasHeight = 640;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    // 渐变背景
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
+    gradient.addColorStop(0, '#667eea');
+    gradient.addColorStop(1, '#764ba2');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    // 顶部标题
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('AI皮肤检测报告', canvasWidth / 2, 50);
+
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('AI智慧皮肤管理中心', canvasWidth / 2, 75);
+
+    // 报告ID
+    ctx.font = '11px monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillText(d.id, canvasWidth / 2, 100);
+
+    // 照片框
+    const photoX = 60;
+    const photoY = 120;
+    const photoW = 120;
+    const photoH = 150;
+    const photoRadius = 16;
+
+    // 照片背景
+    ctx.fillStyle = '#fff';
+    roundRect(ctx, photoX, photoY, photoW, photoH, photoRadius);
+    ctx.fill();
+
+    // 加载照片
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = d.photo;
+    });
+
+    // 裁剪照片为圆形区域
+    ctx.save();
+    roundRect(ctx, photoX, photoY, photoW, photoH, photoRadius);
+    ctx.clip();
+    ctx.drawImage(img, photoX, photoY, photoW, photoH);
+    ctx.restore();
+
+    // 照片标签
+    ctx.fillStyle = '#667eea';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('面部照片', photoX + photoW / 2, photoY + photoH + 20);
+
+    // 评分区域
+    const scoreX = 200;
+    const scoreY = 130;
+
+    // 评分圆圈
+    const scoreRadius = 45;
+    ctx.beginPath();
+    ctx.arc(scoreX + 70, scoreY + 50, scoreRadius, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.strokeStyle = '#667eea';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    // 评分数字
+    ctx.fillStyle = '#667eea';
+    ctx.font = 'bold 32px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(d.overall, scoreX + 70, scoreY + 60);
+
+    // 评分标签
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = '#666';
+    ctx.fillText('综合评分', scoreX + 70, scoreY + 95);
+
+    // 肤质评价
+    let scoreText = '需加强护理';
+    if (d.overall >= 75) scoreText = '优秀肤质';
+    else if (d.overall >= 60) scoreText = '良好肤质';
+
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(scoreText, scoreX + 70, scoreY + 115);
+
+    // 维度评分条
+    const barX = 200;
+    const barY = 270;
+    const barW = 140;
+    const barH = 8;
+
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+
+    d.dims.forEach((dim, i) => {
+      const y = barY + i * 35;
+      const score = d.metrics[dim.key];
+
+      // 标签
+      ctx.fillStyle = '#333';
+      ctx.fillText(dim.label, barX, y);
+
+      // 进度条背景
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      roundRect(ctx, barX, y + 6, barW, barH, 4);
+      ctx.fill();
+
+      // 进度条填充
+      ctx.fillStyle = dim.color;
+      roundRect(ctx, barX, y + 6, barW * (score / 100), barH, 4);
+      ctx.fill();
+
+      // 分数
+      ctx.fillStyle = '#666';
+      ctx.textAlign = 'right';
+      ctx.fillText(score + dim.unit, barX + barW + 30, y);
+      ctx.textAlign = 'left';
+    });
+
+    // 分割线
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(40, 450);
+    ctx.lineTo(canvasWidth - 40, 450);
+    ctx.stroke();
+
+    // 个性化护理方案
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('个性化护理方案', canvasWidth / 2, 480);
+
+    // 护理建议
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.textAlign = 'left';
+
+    const recs = d.immediateRecs.slice(0, 3);
+    recs.forEach((rec, i) => {
+      ctx.fillText(`${rec.rank}. ${rec.text}`, 40, 510 + i * 22, canvasWidth - 80);
+    });
+
+    // 底部信息
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+
+    const now = new Date();
+    const timeStr = now.getFullYear() + '-' +
+      String(now.getMonth() + 1).padStart(2, '0') + '-' +
+      String(now.getDate()).padStart(2, '0') + ' ' +
+      String(now.getHours()).padStart(2, '0') + ':' +
+      String(now.getMinutes()).padStart(2, '0') + ':' +
+      String(now.getSeconds()).padStart(2, '0');
+
+    ctx.fillText(`评估时间：${timeStr}`, canvasWidth / 2, 600);
+    ctx.fillText('基于端侧AI · 智能肤质分析', canvasWidth / 2, 618);
+
+    // 显示canvas并下载
+    canvas.style.display = 'block';
+    canvas.style.position = 'fixed';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.zIndex = '10000';
+    canvas.style.maxWidth = '100%';
+    canvas.style.boxShadow = '0 10px 40px rgba(0,0,0,0.3)';
+
+    // 下载图片
+    const link = document.createElement('a');
+    link.download = `AI皮肤报告_${d.id}_${Date.now()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+
+    // 隐藏canvas
+    setTimeout(() => {
+      canvas.style.display = 'none';
+      canvas.style.position = '';
+      canvas.style.top = '';
+      canvas.style.left = '';
+      canvas.style.zIndex = '';
+      canvas.style.maxWidth = '';
+      canvas.style.boxShadow = '';
+    }, 500);
+
+    showToast('分享图片已生成！长按保存后分享到朋友圈');
+
+  } catch (error) {
+    console.error('生成分享图片失败:', error);
+    showToast('生成失败，请重试');
+  }
+}
+
+// 圆角矩形辅助函数
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }
 
 // ===== Toast =====

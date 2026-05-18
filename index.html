@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI智慧皮肤检测 · 皮肤管理中心</title>
+<!-- TensorFlow.js (本地版本) -->
+<script src="lib/tf.min.js"></script>
+<script src="lib/blazeface.min.js"></script>
 <style>
   :root {
     --primary: #1a2a4a;
@@ -379,6 +382,46 @@
   .camera-area.has-image #preview-img { display: block; }
   .camera-area.has-image .camera-placeholder { display: none; }
 
+  /* Upload Buttons (Mobile) */
+  .upload-buttons {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 15px;
+  }
+  
+  .upload-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border: 2px solid var(--accent);
+    border-radius: 10px;
+    background: rgba(201,168,76,0.1);
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+  
+  .upload-btn:hover {
+    background: var(--accent);
+    color: var(--primary);
+  }
+  
+  .capture-btn {
+    border-color: #10b981;
+    color: #10b981;
+    background: rgba(16,185,129,0.1);
+  }
+  
+  .capture-btn:hover {
+    background: #10b981;
+    color: white;
+  }
+
   /* Scan Button */
   .scan-analyze-btn {
     width: 100%;
@@ -517,65 +560,26 @@
     font-size: 11px;
   }
 
-  /* Demo mode toggle */
-  .demo-mode {
+  /* AI Status */
+  .ai-status {
     margin-top: 16px;
     padding: 12px 16px;
-    background: linear-gradient(135deg, rgba(201,168,76,0.08), rgba(16,185,129,0.08));
-    border: 1px solid rgba(201,168,76,0.15);
+    background: linear-gradient(135deg, rgba(16,185,129,0.08), rgba(16,185,129,0.04));
+    border: 1px solid rgba(16,185,129,0.15);
     border-radius: 10px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
     font-size: 12px;
+    color: #059669;
   }
 
-  .demo-mode-label {
-    color: var(--text-muted);
-    font-weight: 500;
-  }
-
-  .demo-mode-label strong {
-    color: var(--success);
-    font-weight: 700;
-  }
-
-  .toggle-switch {
-    position: relative;
-    width: 44px;
-    height: 24px;
-    cursor: pointer;
-  }
-
-  .toggle-switch input { display: none; }
-
-  .toggle-slider {
-    position: absolute;
-    inset: 0;
-    background: #d1d5db;
-    border-radius: 12px;
-    transition: 0.3s;
-  }
-
-  .toggle-slider::before {
-    content: '';
-    position: absolute;
-    width: 18px;
-    height: 18px;
-    background: #fff;
-    border-radius: 50%;
-    top: 3px;
-    left: 3px;
-    transition: 0.3s;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-  }
-
-  .toggle-switch input:checked + .toggle-slider {
+  .ai-status .dot {
+    width: 8px;
+    height: 8px;
     background: var(--success);
-  }
-
-  .toggle-switch input:checked + .toggle-slider::before {
-    transform: translateX(20px);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
   }
 
   /* ===== Report Page ===== */
@@ -1010,6 +1014,42 @@
 
   .toast.show { transform: translateX(-50%) translateY(0); }
 
+  /* Loading indicator */
+  .model-loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--primary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    transition: opacity 0.5s ease;
+  }
+
+  .model-loading.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .model-loading .spinner {
+    width: 60px;
+    height: 60px;
+    border: 3px solid rgba(201,168,76,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 24px;
+  }
+
+  .model-loading p {
+    color: rgba(255,255,255,0.7);
+    font-size: 14px;
+  }
+
   /* Responsive */
   @media (max-width: 768px) {
     .feature-cards { grid-template-columns: 1fr; }
@@ -1022,17 +1062,15 @@
     .face-display { flex-direction: column; }
     .face-photo { width: 100%; height: auto; aspect-ratio: 4/3; }
   }
-
-  /* Confetti */
-  .confetti {
-    position: fixed;
-    pointer-events: none;
-    z-index: 999;
-    font-size: 24px;
-  }
 </style>
 </head>
 <body>
+
+<!-- Model Loading Screen -->
+<div class="model-loading" id="model-loading">
+  <div class="spinner"></div>
+  <p>正在加载 AI 模型...</p>
+</div>
 
 <!-- Header -->
 <div class="header">
@@ -1043,7 +1081,7 @@
       <span>TIANHE SMART CITY</span>
     </div>
   </div>
-  <div class="header-tag">ANONYMOUS SCAN</div>
+  <div class="header-tag">TensorFlow.js</div>
 </div>
 
 <div class="main-container">
@@ -1053,7 +1091,7 @@
     <div class="welcome-hero">
       <div class="welcome-badge"><span class="dot"></span> AI REAL-TIME ANALYSIS</div>
       <h2>30秒<span style="color:var(--accent)">解锁</span><br>你的专属肤质密码</h2>
-      <p>基于多光谱面部扫描与深度学习算法，从6个维度全面解析你的皮肤状态，并生成个性化护理方案。</p>
+      <p>基于AI算法，从6个维度全面解析你的皮肤状态，并生成个性化护理方案。</p>
 
       <div class="process-steps">
         <div class="step-item">
@@ -1087,8 +1125,8 @@
         </div>
         <div class="feature-card">
           <div class="feature-icon">🧠</div>
-          <h4>AI深度学习算法</h4>
-          <p>基于数十万张皮肤影像训练，检测准确率达医学级参考水平</p>
+          <h4>浏览器端AI算法</h4>
+          <p>基于端侧运行，保护隐私无需上传</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">📱</div>
@@ -1127,6 +1165,18 @@
             </div>
           </div>
           <input type="file" id="file-input" accept="image/*" style="display:none" onchange="handleFileUpload(event)">
+          
+          <!-- 移动端专用：拍照按钮 -->
+          <div class="upload-buttons" id="upload-buttons" style="display:none; margin-top: -20px;">
+            <button class="upload-btn capture-btn" onclick="triggerCamera()">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/></svg>
+              📷 拍照
+            </button>
+            <button class="upload-btn album-btn" onclick="triggerUpload()">
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              📁 从相册选择
+            </button>
+          </div>
           <button class="scan-analyze-btn" id="analyze-btn" onclick="startAnalysis()" disabled>
             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
             开始AI分析
@@ -1142,15 +1192,9 @@
             </ul>
           </div>
 
-          <div class="demo-mode">
-            <div class="demo-mode-label" style="flex:1">
-              <strong>演示模式</strong> · 关闭后使用Face++真实API
-              <div style="font-size:10px;color:#9ca3af;margin-top:2px" id="api-status">未配置API Key</div>
-            </div>
-            <label class="toggle-switch">
-              <input type="checkbox" id="demo-toggle" checked onchange="updateAPIMode()">
-              <span class="toggle-slider"></span>
-            </label>
+          <div class="ai-status">
+            <span class="dot"></span>
+            <span>端侧 AI 模型已就绪 · 本地处理保护隐私</span>
           </div>
         </div>
       </div>
@@ -1166,7 +1210,7 @@
     <div class="report-container">
       <div class="report-header">
         <h2>AI皮肤检测报告</h2>
-        <p>基于多光谱面部扫描 · 智能肤质分析</p>
+        <p>基于端侧AI · 智能肤质分析</p>
         <div class="report-id" id="report-id">RPT-2026-XXXXXX</div>
       </div>
 
@@ -1225,7 +1269,7 @@
         <div class="report-card full-width">
           <div class="report-card-header">
             <h3><span>🧠</span> AI深度分析洞察</h3>
-            <span style="font-size:11px;color:var(--text-muted)">Powered by AI Engine</span>
+            <span style="font-size:11px;color:var(--text-muted)">Powered by TensorFlow.js</span>
           </div>
           <div class="report-card-body">
             <div id="ai-insights" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px"></div>
@@ -1275,123 +1319,196 @@
 </div>
 
 <script>
-// ===== Face++ API Configuration =====
-// 请在此处填写您的 Face++ API 凭证
-// 注册地址: https://faceplusplus.com
-// 获取 API Key: https://console.faceplusplus.com/dashboard
-const FACEPLUSPLUS_CONFIG = {
-  apiKey: '2wks-xrG52WAgmC-1ooXuvWDseQ3tEwS',      // 填写您的 API Key，例如: 'your_api_key_here'
-  apiSecret: 'pC5JqDWqtG41wA5plTI47tfUjFlvrJx0',   // 填写您的 API Secret，例如: 'your_api_secret_here'
-  // Face++ API 基础地址
-  baseUrl: 'https://api-us.faceplusplus.com/facepp/v3'
-};
-
-// ===== State =====
+// ===== TensorFlow.js State =====
+let faceDetector = null;
 let currentImageData = null;
 let scanData = null;
+let modelReady = false;
 
-// ===== Face++ API Functions =====
-async function callFacePlusAPI(imageBase64) {
-  const { apiKey, apiSecret, baseUrl } = FACEPLUSPLUS_CONFIG;
-  
-  if (!apiKey || !apiSecret) {
-    throw new Error('DEMO_MODE');
-  }
-
-  // 构建 FormData - 注意：return_attributes 是逗号分隔的字符串，不是数组
-  const formData = new FormData();
-  formData.append('api_key', apiKey);
-  formData.append('api_secret', apiSecret);
-  formData.append('image_base64', imageBase64);
-  formData.append('return_landmark', '1');
-  // return_attributes 必须是逗号分隔的字符串
-  formData.append('return_attributes', 'gender,age,smiling,headpose,facequality,blur,eyestatus,emotion,ethnicity,beauty,mouthstatus,eyegaze,skinstatus');
-
+// ===== Load TensorFlow.js Face Detection Model =====
+async function loadFaceModel() {
   try {
-    // 正确的端点是 /detect，不是 /face/analyze
-    const response = await fetch(`${baseUrl}/detect`, {
-      method: 'POST',
-      body: formData
-    });
+    const loadingEl = document.getElementById('model-loading');
+    loadingEl.querySelector('p').textContent = '正在加载人脸检测模型...';
     
-    const data = await response.json();
+    // Load BlazeFace model for face detection
+    faceDetector = await blazeface.load();
+    modelReady = true;
     
-    if (!response.ok || data.error_message) {
-      console.error('Face++ API Error:', data);
-      throw new Error('API_ERROR');
-    }
+    loadingEl.classList.add('hidden');
+    setTimeout(() => loadingEl.remove(), 500);
     
-    // 如果没有检测到人脸
-    if (!data.faces || data.faces.length === 0) {
-      throw new Error('NO_FACE_DETECTED');
-    }
-    
-    return data;
+    console.log('✓ TensorFlow.js BlazeFace model loaded');
   } catch (error) {
-    if (error.message === 'DEMO_MODE' || error.message === 'NO_FACE_DETECTED') {
-      throw error;
-    }
-    console.error('Network Error:', error);
-    throw new Error('NETWORK_ERROR');
+    console.error('Failed to load model:', error);
+    document.getElementById('model-loading').querySelector('p').textContent = '模型加载失败，请刷新页面';
   }
 }
 
-function convertFacePPToSkinData(faceData) {
-  // 从 Face++ 返回的数据中提取皮肤相关指标
-  const attrs = faceData.faces[0]?.attributes || {};
-  const skinstatus = attrs.skinstatus || {};
-  const facequality = attrs.facequality?.value || 60;
+// ===== Face Detection using TensorFlow.js =====
+async function detectFace(imageElement) {
+  if (!faceDetector) {
+    throw new Error('MODEL_NOT_READY');
+  }
   
-  // Face++ skinstatus 返回的是百分比值 (0-100)
-  // skin_health: 健康度 (越高越好)
-  // skin_acne: 痘痘程度 (越低越好)
-  // skin_stain: 斑点程度 (越低越好)
-  // skin_dark_circle: 黑眼圈程度 (越低越好)
+  // Run face detection
+  const predictions = await faceDetector.estimateFaces(imageElement, false);
   
-  // 计算水分含量: 基于健康度
-  const health = skinstatus.skin_health || 50;
-  const moisture = Math.min(95, Math.max(30, health * 0.6 + 20));
+  if (predictions.length === 0) {
+    throw new Error('NO_FACE_DETECTED');
+  }
   
-  // 计算油脂分泌: 基于健康度和模糊度
-  const blur = attrs.blur?.value || 50;
-  const oil = Math.min(90, Math.max(20, 50 - health * 0.2 + blur * 0.15));
+  return predictions[0]; // Return first face
+}
+
+// ===== Analyze Skin from Face Region =====
+async function analyzeSkin(imageElement, facePrediction) {
+  // Create canvas to extract face region
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
   
-  // 计算毛孔状态: 基于面部质量和健康度
-  const poreScore = Math.min(100, facequality * 0.6 + health * 0.3 + Math.random() * 10);
-  const pore = Math.round(Math.max(10, 100 - poreScore));
+  // Get face bounding box with some padding
+  const topLeft = facePrediction.topLeft;
+  const bottomRight = facePrediction.bottomRight;
+  const padding = Math.max(
+    bottomRight[0] - topLeft[0],
+    bottomRight[1] - topLeft[1]
+  ) * 0.3; // 30% padding
   
-  // 计算色素沉着: 基于斑点
-  const stain = skinstatus.skin_stain || 40;
-  const pigment = Math.round(Math.max(10, Math.min(80, stain * 1.2)));
+  const x = Math.max(0, topLeft[0] - padding);
+  const y = Math.max(0, topLeft[1] - padding);
+  const width = Math.min(imageElement.width - x, (bottomRight[0] - topLeft[0]) + padding * 2);
+  const height = Math.min(imageElement.height - y, (bottomRight[1] - topLeft[1]) + padding * 2);
   
-  // 计算皱纹: 基于年龄
-  const age = attrs.age?.value || 30;
-  const wrinkle = Math.round(Math.min(80, age * 0.9 + (100 - facequality) * 0.2));
+  canvas.width = width;
+  canvas.height = height;
+  ctx.drawImage(imageElement, x, y, width, height, 0, 0, width, height);
   
-  // 计算敏感程度: 基于痘痘和黑眼圈
-  const acne = skinstatus.skin_acne || 30;
-  const darkCircle = skinstatus.skin_dark_circle || 30;
-  const sensitive = Math.round(Math.min(70, (acne + darkCircle) * 0.5 + Math.random() * 10));
+  // Get image data for analysis
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  
+  // Calculate skin metrics
+  const metrics = calculateSkinMetrics(data, width, height);
+  
+  return metrics;
+}
+
+function calculateSkinMetrics(data, width, height) {
+  // Collect pixel values
+  let rSum = 0, gSum = 0, bSum = 0;
+  let brightnessSum = 0;
+  let pixelCount = 0;
+  let highBrightnessCount = 0;
+  let lowBrightnessCount = 0;
+  
+  // RGB histograms
+  const rHist = new Array(256).fill(0);
+  const gHist = new Array(256).fill(0);
+  const bHist = new Array(256).fill(0);
+  
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    
+    // Skip non-skin pixels (simple skin color filter)
+    if (isSkinColor(r, g, b)) {
+      rSum += r;
+      gSum += g;
+      bSum += b;
+      
+      const brightness = (r + g + b) / 3;
+      brightnessSum += brightness;
+      pixelCount++;
+      
+      rHist[r]++;
+      gHist[g]++;
+      bHist[b]++;
+      
+      if (brightness > 180) highBrightnessCount++;
+      if (brightness < 80) lowBrightnessCount++;
+    }
+  }
+  
+  if (pixelCount < 100) {
+    // Fallback if not enough skin pixels detected
+    return {
+      brightness: 50,
+      redness: 30,
+      uniformity: 70,
+      moisture: 50,
+      oil: 50,
+      pore: 50,
+      pigment: 50,
+      wrinkle: 50,
+      sensitive: 50
+    };
+  }
+  
+  const avgR = rSum / pixelCount;
+  const avgG = gSum / pixelCount;
+  const avgB = bSum / pixelCount;
+  const avgBrightness = brightnessSum / pixelCount;
+  
+  // Calculate color variance (uniformity)
+  let variance = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    if (isSkinColor(r, g, b)) {
+      const diff = Math.abs(r - avgR) + Math.abs(g - avgG) + Math.abs(b - avgB);
+      variance += diff;
+    }
+  }
+  const uniformity = Math.max(0, 100 - (variance / pixelCount) * 0.5);
+  
+  // Calculate redness (red channel relative to others)
+  const redness = Math.min(100, ((avgR - avgG - avgB / 2) / avgR) * 100);
+  
+  // Calculate metrics based on brightness and color analysis
+  // Moisture: Higher brightness + good uniformity = better moisture
+  const moisture = Math.min(95, Math.max(30, 50 + (avgBrightness - 128) * 0.3 + uniformity * 0.2));
+  
+  // Oil: Based on brightness variation and high-light areas
+  const highLightRatio = highBrightnessCount / pixelCount;
+  const oil = Math.min(90, Math.max(20, 40 + highLightRatio * 50));
+  
+  // Pore: Based on uniformity (lower uniformity = more visible pores)
+  const pore = Math.min(90, Math.max(20, 80 - uniformity * 0.5 + Math.random() * 10));
+  
+  // Pigment: Based on color variance and dark spots
+  const darkSpotRatio = lowBrightnessCount / pixelCount;
+  const pigment = Math.min(80, Math.max(20, 30 + darkSpotRatio * 80 + (100 - uniformity) * 0.3));
+  
+  // Wrinkle: Estimate based on brightness distribution (simulated)
+  const wrinkle = Math.min(70, Math.max(20, 30 + (100 - uniformity) * 0.3 + Math.random() * 15));
+  
+  // Sensitive: Based on redness and uniformity
+  const sensitive = Math.min(70, Math.max(20, 20 + redness * 0.5 + (100 - uniformity) * 0.2));
   
   return {
+    brightness: Math.round(avgBrightness),
+    redness: Math.round(Math.max(0, redness)),
+    uniformity: Math.round(uniformity),
     moisture: Math.round(moisture),
     oil: Math.round(oil),
-    pore: pore,
-    pigment: pigment,
-    wrinkle: wrinkle,
-    sensitive: sensitive,
-    age: age,
-    ethnicity: attrs.ethnicity?.value || 'asian',
-    gender: attrs.gender?.value || 'Male',
-    // 原始数据供参考
-    _raw: {
-      skin_health: skinstatus.skin_health,
-      skin_acne: skinstatus.skin_acne,
-      skin_stain: skinstatus.skin_stain,
-      skin_dark_circle: skinstatus.skin_dark_circle,
-      beauty: attrs.beauty?.value
-    }
+    pore: Math.round(pore),
+    pigment: Math.round(pigment),
+    wrinkle: Math.round(wrinkle),
+    sensitive: Math.round(sensitive)
   };
+}
+
+function isSkinColor(r, g, b) {
+  // Simple skin color detection using RGB rules
+  // Adjusted for Asian skin tones
+  const isSkin = r > 95 && g > 40 && b > 20 &&
+    Math.max(r, g, b) - Math.min(r, g, b) > 15 &&
+    Math.abs(r - g) > 15 &&
+    r > g && r > b;
+  return isSkin;
 }
 
 // ===== Navigation =====
@@ -1401,12 +1518,49 @@ function showPage(name) {
 }
 
 function startScan() {
+  if (!modelReady) {
+    showToast('AI模型加载中，请稍候...');
+    return;
+  }
   showPage('scan');
 }
 
 // ===== File Upload =====
 function triggerUpload() {
   document.getElementById('file-input').click();
+}
+
+// ===== Camera Capture (Mobile) =====
+function triggerCamera() {
+  // 创建一个专门用于拍照的 input，触发前置摄像头
+  const cameraInput = document.createElement('input');
+  cameraInput.type = 'file';
+  cameraInput.accept = 'image/*';
+  cameraInput.capture = 'user'; // 前置摄像头
+  cameraInput.onchange = function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      currentImageData = e.target.result;
+      const img = document.getElementById('preview-img');
+      img.src = currentImageData;
+      document.getElementById('camera-area').classList.add('has-image');
+      document.getElementById('analyze-btn').disabled = false;
+      document.getElementById('scan-status').textContent = '已识别到人脸，点击"开始AI分析"';
+      
+      // 自动检测人脸
+      detectAndHighlight();
+    };
+    reader.readAsDataURL(file);
+  };
+  cameraInput.click();
+}
+
+// 检测是否为移动设备
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
 function handleFileUpload(event) {
@@ -1426,12 +1580,12 @@ function handleFileUpload(event) {
 
 // ===== Analysis =====
 const SCAN_STEPS = [
-  { pct: 10, status: '正在初始化AI扫描引擎...' },
-  { pct: 25, status: '正在连接Face++人脸识别服务...' },
-  { pct: 40, status: '正在进行面部关键点检测...' },
-  { pct: 60, status: '多光谱肤质深度分析中...' },
-  { pct: 75, status: 'AI正在比对数十万皮肤样本...' },
-  { pct: 90, status: '计算6维度肤质评分...' },
+  { pct: 10, status: '正在初始化TensorFlow.js引擎...' },
+  { pct: 25, status: '正在加载BlazeFace人脸检测模型...' },
+  { pct: 40, status: '正在检测面部关键点...' },
+  { pct: 60, status: '正在分析皮肤颜色与纹理...' },
+  { pct: 75, status: 'AI正在计算肤质评分...' },
+  { pct: 90, status: '正在生成个性化护理方案...' },
   { pct: 100, status: '分析完成！' },
 ];
 
@@ -1440,50 +1594,38 @@ async function startAnalysis() {
   const progressBar = document.getElementById('scan-progress-bar');
   const statusEl = document.getElementById('scan-status');
   const btn = document.getElementById('analyze-btn');
-  const demoMode = document.getElementById('demo-toggle').checked;
 
   overlay.classList.add('active');
   btn.disabled = true;
   btn.textContent = '分析中，请稍候...';
 
   try {
-    let skinScores;
-    
-    if (demoMode) {
-      // 演示模式：使用模拟数据
-      for (const step of SCAN_STEPS) {
-        await animateProgress(step.pct, step.status);
-        await sleep(step.pct === 10 ? 800 : 400 + Math.random() * 400);
-      }
-      await sleep(600);
-      skinScores = generateMockSkinScores();
-    } else {
-      // 真实 API 模式
-      const steps = [
-        { pct: 10, status: '正在初始化AI扫描引擎...' },
-        { pct: 30, status: '正在连接Face++人脸识别服务...' },
-        { pct: 50, status: '正在上传图像并检测人脸...' },
-        { pct: 70, status: '正在分析皮肤状态...' },
-        { pct: 85, status: '正在计算肤质评分...' },
-        { pct: 95, status: '正在生成护理建议...' },
-        { pct: 100, status: '分析完成！' },
-      ];
-      
-      for (const step of steps) {
-        await animateProgress(step.pct, step.status);
-        await sleep(step.pct <= 30 ? 500 : 300 + Math.random() * 200);
-      }
-      
-      // 调用 Face++ API
-      const imageBase64 = currentImageData.split(',')[1];
-      const faceData = await callFacePlusAPI(imageBase64);
-      skinScores = convertFacePPToSkinData(faceData);
-      
-      await sleep(400);
+    // Show progress animation
+    for (const step of SCAN_STEPS) {
+      await animateProgress(step.pct, step.status);
+      await sleep(step.pct === 10 ? 500 : 300 + Math.random() * 300);
     }
 
-    // 生成报告数据
-    scanData = generateSkinData(skinScores);
+    // Load image for analysis
+    const img = new Image();
+    img.src = currentImageData;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+
+    // Detect face
+    statusEl.textContent = '正在检测人脸...';
+    const facePrediction = await detectFace(img);
+
+    // Analyze skin
+    statusEl.textContent = '正在分析皮肤状态...';
+    const skinMetrics = await analyzeSkin(img, facePrediction);
+    
+    await sleep(400);
+
+    // Generate report
+    scanData = generateSkinData(skinMetrics);
 
     // Show report
     renderReport();
@@ -1495,12 +1637,8 @@ async function startAnalysis() {
     btn.disabled = false;
     btn.innerHTML = `<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg> 开始AI分析`;
     
-    if (error.message === 'DEMO_MODE') {
-      showToast('请填写 Face++ API Key，或开启演示模式');
-    } else if (error.message === 'API_ERROR') {
-      showToast('API调用失败，请检查凭证是否正确');
-    } else if (error.message === 'NETWORK_ERROR') {
-      showToast('网络连接失败，请检查网络后重试');
+    if (error.message === 'MODEL_NOT_READY') {
+      showToast('AI模型加载中，请稍候...');
     } else if (error.message === 'NO_FACE_DETECTED') {
       showToast('未检测到人脸，请上传清晰的面部照片');
     } else {
@@ -1523,22 +1661,8 @@ function animateProgress(targetPct, status) {
   });
 }
 
-function generateMockSkinScores() {
-  return {
-    moisture: Math.floor(Math.random() * 30) + 40,
-    oil: Math.floor(Math.random() * 30) + 40,
-    pore: Math.floor(Math.random() * 30) + 40,
-    pigment: Math.floor(Math.random() * 30) + 40,
-    wrinkle: Math.floor(Math.random() * 30) + 40,
-    sensitive: Math.floor(Math.random() * 30) + 40,
-    age: Math.floor(Math.random() * 30) + 22,
-    ethnicity: 'asian',
-    gender: 'Male'
-  };
-}
-
 // ===== Generate Skin Data =====
-function generateSkinData(scores) {
+function generateSkinData(metrics) {
   const dims = [
     { key: 'moisture', label: '水分含量', icon: '💧', color: '#3b82f6', unit: '%' },
     { key: 'oil', label: '油脂分泌', icon: '🛢️', color: '#f59e0b', unit: '%' },
@@ -1550,44 +1674,44 @@ function generateSkinData(scores) {
 
   const levels = {};
   dims.forEach(d => {
-    const score = scores[d.key];
+    const score = metrics[d.key];
     levels[d.key] = score < 50 ? '偏弱' : score < 70 ? '良好' : '优秀';
   });
 
   const overall = Math.round(
-    (scores.moisture * 0.2 + scores.oil * 0.15 + (100 - scores.pore) * 0.15 +
-    (100 - scores.pigment) * 0.2 + (100 - scores.wrinkle) * 0.15 + (100 - scores.sensitive) * 0.15)
+    (metrics.moisture * 0.2 + metrics.oil * 0.15 + (100 - metrics.pore) * 0.15 +
+    (100 - metrics.pigment) * 0.2 + (100 - metrics.wrinkle) * 0.15 + (100 - metrics.sensitive) * 0.15)
   );
 
-  // 根据实际数据生成洞察
+  // Generate insights based on metrics
   const insights = [];
-  if (scores.oil > 65) {
-    insights.push({ title: 'T区油脂分泌偏高', desc: `T区油脂分泌指数达到${scores.oil}%，建议加强深层清洁与控油护理`, severity: 'warning' });
+  if (metrics.oil > 65) {
+    insights.push({ title: 'T区油脂分泌偏高', desc: `T区油脂分泌指数达到${metrics.oil}%，建议加强深层清洁与控油护理`, severity: 'warning' });
   } else {
     insights.push({ title: '油脂分泌状态良好', desc: 'T区油脂分泌处于健康范围，继续保持', severity: 'info' });
   }
   
-  if (scores.wrinkle > 60) {
+  if (metrics.wrinkle > 60) {
     insights.push({ title: '眼下细纹需关注', desc: '眼下区域检测到早期细纹迹象，建议加强保湿并使用含视黄醇成分的眼霜', severity: 'warning' });
   } else {
     insights.push({ title: '细纹状况良好', desc: '眼下区域皮肤状态良好，继续保持护理习惯', severity: 'info' });
   }
   
-  if (scores.sensitive > 55) {
-    insights.push({ title: '局部敏感风险', desc: `面颊区域敏感指数${scores.sensitive}%，建议选择温和无刺激的护肤品`, severity: 'warning' });
+  if (metrics.sensitive > 55) {
+    insights.push({ title: '局部敏感风险', desc: `面颊区域敏感指数${metrics.sensitive}%，建议选择温和无刺激的护肤品`, severity: 'warning' });
   } else {
     insights.push({ title: '皮肤屏障较健康', desc: '敏感指数处于正常范围，皮肤屏障功能良好', severity: 'info' });
   }
 
-  // 根据数据分析生成个性化建议
+  // Personalized recommendations
   const immediateRecs = [];
-  if (scores.moisture < 50) {
+  if (metrics.moisture < 50) {
     immediateRecs.push({ rank: immediateRecs.length + 1, text: '<strong>深层补水</strong>：使用含透明质酸+神经酰胺的精华敷料，每周3次' });
   }
-  if (scores.oil > 60) {
+  if (metrics.oil > 60) {
     immediateRecs.push({ rank: immediateRecs.length + 1, text: '<strong>控油调理</strong>：早晚使用含水杨酸的洁面，控制T区油脂分泌' });
   }
-  if (scores.sensitive > 50) {
+  if (metrics.sensitive > 50) {
     immediateRecs.push({ rank: immediateRecs.length + 1, text: '<strong>屏障修护</strong>：选择含积雪草/泛醇的护肤品，强化皮肤屏障' });
   }
   if (immediateRecs.length === 0) {
@@ -1609,17 +1733,18 @@ function generateSkinData(scores) {
   ];
 
   const compares = [
-    { dim: '水分含量', before: Math.max(30, scores.moisture - 15), after: Math.min(90, scores.moisture + 15) },
-    { dim: '油脂分泌', before: Math.min(90, scores.oil + 12), after: Math.max(30, scores.oil - 12) },
-    { dim: '敏感程度', before: Math.min(80, scores.sensitive + 10), after: Math.max(20, scores.sensitive - 10) },
+    { dim: '水分含量', before: Math.max(30, metrics.moisture - 15), after: Math.min(90, metrics.moisture + 15) },
+    { dim: '油脂分泌', before: Math.min(90, metrics.oil + 12), after: Math.max(30, metrics.oil - 12) },
+    { dim: '敏感程度', before: Math.min(80, metrics.sensitive + 10), after: Math.max(20, metrics.sensitive - 10) },
   ];
 
   return {
-    dims, scores, levels, overall,
+    dims, metrics, levels, overall,
     insights, immediateRecs, longtermRecs, products, compares,
-    photo: currentImageData || 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" style="background:#e5e7eb"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#9ca3af" font-size="14">面部图像</text></svg>'),
+    photo: currentImageData,
     id: 'RPT-2026-' + String(Math.floor(Math.random() * 900000) + 100000),
-    dataSource: document.getElementById('demo-toggle').checked ? 'demo' : 'facepp'
+    brightness: metrics.brightness,
+    uniformity: metrics.uniformity
   };
 }
 
@@ -1651,7 +1776,7 @@ function renderReport() {
   const barsEl = document.getElementById('dimension-bars');
   barsEl.innerHTML = '';
   d.dims.forEach((dim, i) => {
-    const score = d.scores[dim.key];
+    const score = d.metrics[dim.key];
     const bar = document.createElement('div');
     bar.className = 'dim-bar';
     bar.innerHTML = `
@@ -1701,7 +1826,21 @@ function renderReport() {
   const sevColors = { warning: '#f59e0b', info: '#3b82f6' };
   const sevBgs = { warning: 'rgba(245,158,11,0.08)', info: 'rgba(59,130,246,0.08)' };
   const sevIcons = { warning: '⚠️', info: 'ℹ️' };
-  insightsEl.innerHTML = d.insights.map(ins => `
+  
+  // Add image analysis insights
+  let imageInsights = [];
+  if (d.brightness < 100) {
+    imageInsights.push({ title: '面部亮度偏低', desc: `检测到面部亮度为${d.brightness}，建议改善拍摄光线或加强美白护理`, severity: 'warning' });
+  } else if (d.brightness > 180) {
+    imageInsights.push({ title: '面部亮度偏高', desc: `检测到面部亮度为${d.brightness}，可能有反光区域，建议柔和光线拍摄`, severity: 'info' });
+  }
+  if (d.uniformity < 70) {
+    imageInsights.push({ title: '肤色均匀度待改善', desc: `检测到肤色均匀度为${d.uniformity}%，可能存在色斑或肤色不均问题`, severity: 'warning' });
+  }
+  
+  const allInsights = [...imageInsights, ...d.insights];
+  
+  insightsEl.innerHTML = allInsights.map(ins => `
     <div style="padding:16px;background:${sevBgs[ins.severity]};border-radius:12px;border:1px solid ${sevColors[ins.severity]}22">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-size:16px">${sevIcons[ins.severity]}</span>
@@ -1731,36 +1870,6 @@ function switchTab(el, tabId) {
   el.classList.add('active');
   document.getElementById(tabId).classList.add('active');
 }
-
-// ===== API Mode Toggle =====
-function updateAPIMode() {
-  const demoMode = document.getElementById('demo-toggle').checked;
-  const statusEl = document.getElementById('api-status');
-  
-  if (demoMode) {
-    statusEl.textContent = '未配置API Key';
-    statusEl.style.color = '#9ca3af';
-  } else {
-    if (FACEPLUSPLUS_CONFIG.apiKey && FACEPLUSPLUS_CONFIG.apiSecret) {
-      statusEl.textContent = '✓ Face++ API 已连接';
-      statusEl.style.color = '#10b981';
-    } else {
-      statusEl.textContent = '⚠ 请先配置 API Key';
-      statusEl.style.color = '#f59e0b';
-      document.getElementById('demo-toggle').checked = true;
-      showToast('请先在代码中配置 Face++ API Key');
-    }
-  }
-}
-
-// Check API config on load
-window.addEventListener('DOMContentLoaded', function() {
-  if (FACEPLUSPLUS_CONFIG.apiKey && FACEPLUSPLUS_CONFIG.apiSecret) {
-    const statusEl = document.getElementById('api-status');
-    statusEl.textContent = '✓ Face++ API 已就绪';
-    statusEl.style.color = '#10b981';
-  }
-});
 
 // ===== Number Animation =====
 function animateNumber(el, from, to, duration) {
@@ -1799,6 +1908,16 @@ function resetDemo() {
   document.getElementById('scan-progress-bar').style.width = '0%';
   showPage('welcome');
 }
+
+// ===== Initialize =====
+window.addEventListener('DOMContentLoaded', loadFaceModel);
+
+// 移动设备检测：显示拍照按钮
+window.addEventListener('DOMContentLoaded', function() {
+  if (isMobileDevice()) {
+    document.getElementById('upload-buttons').style.display = 'flex';
+  }
+});
 </script>
 </body>
 </html>

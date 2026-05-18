@@ -1221,7 +1221,7 @@
         <div class="report-card">
           <div class="report-card-header">
             <h3><span>📊</span> 综合肤质评分</h3>
-            <span style="font-size:11px;color:var(--text-muted)">评估时间：刚刚</span>
+            <span style="font-size:11px;color:var(--text-muted)" id="eval-time">评估时间：</span>
           </div>
           <div class="report-card-body">
             <div class="face-display">
@@ -1271,7 +1271,7 @@
         <div class="report-card full-width">
           <div class="report-card-header">
             <h3><span>🧠</span> AI深度分析洞察</h3>
-            <span style="font-size:11px;color:var(--text-muted)">Powered by TensorFlow.js</span>
+            <!-- <span style="font-size:11px;color:var(--text-muted)">Powered by TensorFlow.js</span> -->
           </div>
           <div class="report-card-body">
             <div id="ai-insights" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px"></div>
@@ -1785,6 +1785,16 @@ function renderReport() {
   // Report ID
   document.getElementById('report-id').textContent = d.id;
   document.getElementById('report-face').src = d.photo;
+  
+  // 评估时间（当前时间）
+  const now = new Date();
+  const timeStr = now.getFullYear() + '-' + 
+    String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+    String(now.getDate()).padStart(2, '0') + ' ' + 
+    String(now.getHours()).padStart(2, '0') + ':' + 
+    String(now.getMinutes()).padStart(2, '0') + ':' + 
+    String(now.getSeconds()).padStart(2, '0');
+  document.getElementById('eval-time').textContent = '评估时间：' + timeStr;
 
   // Score animation
   setTimeout(() => {

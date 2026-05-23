@@ -345,16 +345,62 @@ function calculateSkinMetrics(data, width, height) {
   const highLightRatio = highBrightnessCount / pixelCount;
   const oil = Math.min(90, Math.max(20, 40 + highLightRatio * 50));
   
-  // Pore: Based on uniformity (lower uniformity = more visible pores)
-  const pore = Math.min(90, Math.max(20, 80 - uniformity * 0.5 + Math.random() * 10));
-  
+  // --- Spatial texture analysis (stride sampling for deterministic pore/wrinkle) ---
+  const STRIDE =Math.max(1, Math.min(width, height) >> 6); // ~64 samples across smallest dimension
+  let microVarSum = 0, microVarCount = 0;
+  let edgeSum = 0, edgeCount = 0;
+
+  for (let y = 1; y < height - 1; y += STRIDE) {
+    for (let x = 1; x < width - 1; x += STRIDE) {
+      const idx = (y * width + x) * 4;
+      if (!isSkinColor(data[idx], data[idx + 1], data[idx + 2])) continue;
+
+      const bright = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+
+      // Micro-variance in 3×3 neighborhood (pore proxy: fine texture granularity)
+      let localVariance = 0, localCount = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nIdx = ((y + dy) * width + (x + dx)) * 4;
+          if (isSkinColor(data[nIdx], data[nIdx + 1], data[nIdx + 2])) {
+            const nb = (data[nIdx] + data[nIdx + 1] + data[nIdx + 2]) / 3;
+            localVariance += (nb - bright) * (nb - bright);
+            localCount++;
+          }
+        }
+      }
+      if (localCount >= 5) {
+        microVarSum += Math.sqrt(localVariance / localCount);
+        microVarCount++;
+      }
+
+      // Edge gradient magnitude (wrinkle proxy: fine-line contrast)
+      const iU = ((y - 1) * width + x) * 4, iD = ((y + 1) * width + x) * 4;
+      const iL = (y * width + (x - 1)) * 4, iR = (y * width + (x + 1)) * 4;
+      const bU = (data[iU] + data[iU + 1] + data[iU + 2]) / 3;
+      const bD = (data[iD] + data[iD + 1] + data[iD + 2]) / 3;
+      const bL = (data[iL] + data[iL + 1] + data[iL + 2]) / 3;
+      const bR = (data[iR] + data[iR + 1] + data[iR + 2]) / 3;
+      edgeSum += Math.abs(bR - bL) + Math.abs(bD - bU);
+      edgeCount++;
+    }
+  }
+
+  const microTexture = microVarCount > 20 ? (microVarSum / microVarCount) : 5;
+  const edgeEnergy   = edgeCount > 20   ? (edgeSum / edgeCount)     : 10;
+
+  // Pore: Higher micro-texture variance + low uniformity = more visible pores
+  //       microTexture typical range ~2-20; clamp via scaling
+  const pore = Math.min(90, Math.max(20, 35 + microTexture * 1.8 + (100 - uniformity) * 0.25));
+
   // Pigment: Based on color variance and dark spots
   const darkSpotRatio = lowBrightnessCount / pixelCount;
   const pigment = Math.min(80, Math.max(20, 30 + darkSpotRatio * 80 + (100 - uniformity) * 0.3));
-  
-  // Wrinkle: Estimate based on brightness distribution (simulated)
-  const wrinkle = Math.min(70, Math.max(20, 30 + (100 - uniformity) * 0.3 + Math.random() * 15));
-  
+
+  // Wrinkle: Higher edge energy + low uniformity = more visible fine lines
+  //          edgeEnergy typical range ~5-35
+  const wrinkle = Math.min(70, Math.max(20, 20 + edgeEnergy * 1.2 + (100 - uniformity) * 0.2));
+
   // Sensitive: Based on redness and uniformity
   const sensitive = Math.min(70, Math.max(20, 20 + redness * 0.5 + (100 - uniformity) * 0.2));
   

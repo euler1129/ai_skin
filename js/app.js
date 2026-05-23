@@ -75,88 +75,40 @@ async function detectFace(imageElement) {
     throw new Error('INVALID_FACE_RATIO');
   }
 
-  // --- 5. 关键点几何一致性校验（自适应关键点数量，侧脸免对称检查） ---
+  // --- 5. 关键点几何一致性校验（仅作警告记录，不拒绝——BlazeFace 标注精度有限） ---
   const lm = face.landmarks;
   const hasLandmarks = lm && lm.length >= 4;
-  // 半脸/侧脸可能只有 4-5 个关键点，不应直接拒绝
   if (hasLandmarks) {
-    // 侧脸判定：耳部关键点是否完整可区分左右
     const hasBothEars = lm.length >= 6;
-    const isProfile = !hasBothEars; // 侧脸通常缺少耳朵关键点
+    const isProfile = !hasBothEars;
 
-    // 5a. 眼距与脸宽的比例（侧脸放宽到 0.06~0.75，正脸放宽到 0.12~0.65）
+    // 5a. 眼距比例（仅记录）
     if (lm.length >= 2) {
       const eyeDist = Math.hypot(lm[1][0] - lm[0][0], lm[1][1] - lm[0][1]);
       const eyeToFaceRatio = eyeDist / faceW;
-      const lo = isProfile ? 0.06 : 0.12;
-      const hi = isProfile ? 0.75 : 0.65;
-      if (eyeToFaceRatio < lo || eyeToFaceRatio > hi) {
-        console.warn('[防作弊] 眼距比例异常:', eyeToFaceRatio.toFixed(3), 'isProfile:', isProfile);
-        throw new Error('UNNATURAL_EYE_SPACING');
+      if (eyeToFaceRatio < 0.06 || eyeToFaceRatio > 0.75) {
+        console.warn('[关键点] 眼距比例异常:', eyeToFaceRatio.toFixed(3), 'type:', isProfile ? '侧脸' : '正脸');
       }
     }
 
-    // 5b-c. 鼻、嘴位置（仅当对应关键点存在时校验）
+    // 5b. 鼻子/嘴巴位置（仅记录）
     if (lm.length >= 3 && lm.length >= 2) {
-      const eyeMidX = (lm[0][0] + lm[1][0]) / 2;
       const eyeMidY = (lm[0][1] + lm[1][1]) / 2;
-      const eyeDist = Math.hypot(lm[1][0] - lm[0][0], lm[1][1] - lm[0][1]);
-
-      // 鼻子偏移容限：侧脸 0.75，正脸 0.45（放宽，适配头部微小倾斜）
-      const noseOffsetX = lm[2][0] - eyeMidX;
-      const noseTol = isProfile ? eyeDist * 0.75 : eyeDist * 0.45;
-      if (Math.abs(noseOffsetX) > noseTol) {
-        console.warn('[防作弊] 鼻子偏移:', (noseOffsetX / eyeDist).toFixed(3), '容限:', isProfile ? '0.75' : '0.45');
-        throw new Error('UNNATURAL_NOSE_POSITION');
-      }
       if (lm[2][1] <= eyeMidY) {
-        throw new Error('INVERTED_FACE_GEOMETRY');
+        console.warn('[关键点] 鼻子在眼睛上方（可能检测偏差）');
       }
     }
-
-    // 5c. 嘴巴位置
     if (lm.length >= 4 && lm.length >= 3) {
       if (lm[3][1] <= lm[2][1]) {
-        throw new Error('UNNATURAL_MOUTH_POSITION');
-      }
-    }
-
-    // 5d. 对称性：仅正脸检测，侧脸跳过（放宽至 40%）
-    if (!isProfile && lm.length >= 3 && lm.length >= 2) {
-      const leftEyeToNose = Math.hypot(lm[0][0] - lm[2][0], lm[0][1] - lm[2][1]);
-      const rightEyeToNose = Math.hypot(lm[1][0] - lm[2][0], lm[1][1] - lm[2][1]);
-      const symmetryRatio = Math.min(leftEyeToNose, rightEyeToNose) / Math.max(leftEyeToNose, rightEyeToNose);
-      if (symmetryRatio < 0.40) {
-        console.warn('[防作弊] 面部对称度:', symmetryRatio.toFixed(3));
-        throw new Error('FACE_ASYMMETRY');
-      }
-    }
-
-    // 5e. 眼-鼻-嘴角度：侧脸放宽至 90°~179.5°，正脸放宽至 115°~179.5°
-    if (lm.length >= 4 && lm.length >= 2) {
-      const eyeMidX2 = (lm[0][0] + lm[1][0]) / 2;
-      const eyeMidY2 = (lm[0][1] + lm[1][1]) / 2;
-      const v1 = [lm[2][0] - eyeMidX2, lm[2][1] - eyeMidY2];
-      const v2 = [lm[3][0] - eyeMidX2, lm[3][1] - eyeMidY2];
-      const len1 = Math.hypot(v1[0], v1[1]);
-      const len2 = Math.hypot(v2[0], v2[1]);
-      if (len1 > 0 && len2 > 0) {
-        const cosA = (v1[0] * v2[0] + v1[1] * v2[1]) / (len1 * len2);
-        const angleDeg = Math.acos(Math.max(-1, Math.min(1, cosA))) * (180 / Math.PI);
-        const loAngle = isProfile ? 90 : 115;
-        if (angleDeg < loAngle || angleDeg > 179.5) {
-          console.warn('[防作弊] 眼鼻嘴角度:', angleDeg.toFixed(1) + '°', 'isProfile:', isProfile);
-          throw new Error('UNNATURAL_FACE_ANGLE');
-        }
+        console.warn('[关键点] 嘴巴在鼻子上方（可能检测偏差）');
       }
     }
   }
-  // 即使没有足够 landmarks，只要有 bounding box 也放行（侧脸情况）
 
-  // --- 6. 肤色分布分析（放宽阈值适应不同光线/肤色） ---
+  // --- 6. 肤色分布分析（极端异常才拒绝） ---
   await verifySkinColorDistribution(imageElement, face);
 
-  // --- 7. 原图/素颜检测（排除过度修图、美颜滤镜） ---
+  // --- 7. 原图/素颜检测（仅保留核心纹理检测） ---
   await verifyRawPhoto(imageElement, face);
 
   // 保存检测结果供报告页绘制关键点
@@ -198,22 +150,22 @@ async function verifySkinColorDistribution(imageElement, face) {
     }
   }
 
-  // 肤色像素占比低于 12% 则可能非真人照片（放宽以适应暗光/侧脸）
-  if (totalCount > 0 && skinCount / totalCount < 0.12) {
-    console.warn('[防作弊] 肤色像素占比:', (skinCount / totalCount * 100).toFixed(1) + '%');
+  // 肤色像素占比低于 5% 才可能非真人（极端情况拒绝）
+  if (totalCount > 0 && skinCount / totalCount < 0.05) {
+    console.warn('[肤色] 肤色像素占比极低:', (skinCount / totalCount * 100).toFixed(1) + '%');
     throw new Error('NOT_REAL_SKIN');
   }
 
-  // 平均肤色异常检查 — 防止灰度图/黑白图/动漫
+  // 平均肤色异常检查 — 仅 R/G/B 完全一致（灰度图/动漫）才拒绝
   if (skinCount > 0) {
     const avgR = rSum / skinCount;
     const avgG = gSum / skinCount;
     const avgB = bSum / skinCount;
-    // 动漫/AI 肤色 R/G/B 几乎一致；真人始终有差异
     const rgDiff = avgR - avgG;
     const rbDiff = avgR - avgB;
-    if (rgDiff < 2 || rbDiff < 1) {
-      console.warn('[防作弊] 肤色RGB差异: R=' + avgR.toFixed(0) + ' G=' + avgG.toFixed(0) + ' B=' + avgB.toFixed(0));
+    // 极度异常：R/G 几乎相等且 R/B 几乎相等（灰度图/AI生成）
+    if (rgDiff < 0.3 && rbDiff < 0.3) {
+      console.warn('[肤色] RGB通道几乎一致 R=' + avgR.toFixed(0) + ' G=' + avgG.toFixed(0) + ' B=' + avgB.toFixed(0));
       throw new Error('ABNORMAL_SKIN_COLOR');
     }
   }
@@ -267,80 +219,9 @@ async function verifyRawPhoto(imageElement, face) {
 
   if (sampleCount > 0) {
     const avgTextureVar = textureVariance / sampleCount;
-    // 美颜滤镜会降低纹理方差（放宽至 1.5，适配手机拍照/暗光/自带美颜）
-    if (avgTextureVar < 1.5) {
-      console.warn('[防作弊] 纹理方差过低:', avgTextureVar.toFixed(2), '（可能过度美颜）');
-      throw new Error('HEAVILY_FILTERED');
-    }
-  }
-
-  // --- B. ELA (Error Level Analysis)：比较原图与二次压缩的差异 ---
-  const originalDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  const recompImg = await loadImageFromUrl(originalDataUrl);
-  const canvas2 = document.createElement('canvas');
-  canvas2.width = w;
-  canvas2.height = h;
-  const ctx2 = canvas2.getContext('2d');
-  ctx2.drawImage(recompImg, 0, 0, w, h);
-  const recompData = ctx2.getImageData(0, 0, w, h).data;
-
-  let elaSum = 0;
-  let elaCount = 0;
-  let highElaCount = 0;
-  for (let i = 0; i < recompData.length; i += 4) {
-    const diff = Math.abs(data[i] - recompData[i]) +
-                 Math.abs(data[i + 1] - recompData[i + 1]) +
-                 Math.abs(data[i + 2] - recompData[i + 2]);
-    elaSum += diff;
-    elaCount++;
-    // 高误差像素比例（修图区域会产生不一致的压缩误差）
-    if (diff > 30) highElaCount++;
-  }
-
-  if (elaCount > 0) {
-    const avgEla = elaSum / elaCount;
-    const highElaRatio = highElaCount / elaCount;
-
-    // 全局平均 ELA 过高 → 图像被过度编辑或非原图（放宽至 25，手机拍照/压缩自然偏高）
-    if (avgEla > 25) {
-      console.warn('[防作弊] ELA均值过高:', avgEla.toFixed(2), '（可能修图）');
-      throw new Error('NOT_ORIGINAL_PHOTO');
-    }
-    // 高误差区域占比过大 → 大面积修图痕迹（放宽至 0.30）
-    if (highElaRatio > 0.30) {
-      console.warn('[防作弊] 高ELA占比:', (highElaRatio * 100).toFixed(1) + '%');
-      throw new Error('NOT_ORIGINAL_PHOTO');
-    }
-  }
-
-  // --- C. 高频细节检测：素颜皮肤在频域应有自然的中高频分量 ---
-  let edgeEnergy = 0;
-  let edgeCount = 0;
-  const gray = new Float32Array(w * h);
-  for (let i = 0; i < data.length; i += 4) {
-    gray[i >> 2] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-  }
-  // Sobel 边缘检测（跳步采样）
-  const s2 = Math.max(1, Math.floor(Math.min(w, h) / 80));
-  for (let y = s2; y < h - s2; y += s2) {
-    for (let x = s2; x < w - s2; x += s2) {
-      const idx = y * w + x;
-      const gx = -gray[idx - w - 1] + gray[idx - w + 1]
-                - 2 * gray[idx - 1] + 2 * gray[idx + 1]
-                - gray[idx + w - 1] + gray[idx + w + 1];
-      const gy = gray[idx - w - 1] + 2 * gray[idx - w] + gray[idx - w + 1]
-                - gray[idx + w - 1] - 2 * gray[idx + w] - gray[idx + w + 1];
-      edgeEnergy += Math.abs(gx) + Math.abs(gy);
-      edgeCount++;
-    }
-  }
-
-  if (edgeCount > 0) {
-    const avgEdge = edgeEnergy / edgeCount;
-    // 美颜后边缘能量极低（磨皮消除所有纹理，放宽至 4，适配暗光/美颜）
-    if (avgEdge < 4) {
-      console.warn('[防作弊] 边缘能量过低:', avgEdge.toFixed(2));
-      throw new Error('HEAVILY_FILTERED');
+    // 极度平滑（< 1.0）才警告，可能是重度美颜，但不拒绝
+    if (avgTextureVar < 1.0) {
+      console.warn('[纹理] 皮肤纹理极低:', avgTextureVar.toFixed(2), '（可能重度美颜，但允许通过）');
     }
   }
 
@@ -349,15 +230,6 @@ async function verifyRawPhoto(imageElement, face) {
   function faceH() { return face.bottomRight[1] - face.topLeft[1]; }
 }
 
-// 辅助：从 dataURL 加载 Image
-function loadImageFromUrl(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
-}
 
 // ===== Analyze Skin from Face Region =====
 async function analyzeSkin(imageElement, facePrediction) {
@@ -732,14 +604,8 @@ async function startAnalysis() {
       showToast('面部占比过小，请靠近镜头重新拍摄');
     } else if (error.message === 'INVALID_FACE_RATIO') {
       showToast('面部比例异常，请保持正面角度拍摄');
-    } else if (error.message === 'UNNATURAL_EYE_SPACING' || error.message === 'UNNATURAL_NOSE_POSITION' || error.message === 'INVERTED_FACE_GEOMETRY' || error.message === 'UNNATURAL_MOUTH_POSITION' || error.message === 'FACE_ASYMMETRY' || error.message === 'UNNATURAL_FACE_ANGLE') {
-      showToast('面部特征异常，请上传真人照片（不支持动漫/AI生成图片）');
     } else if (error.message === 'NOT_REAL_SKIN' || error.message === 'ABNORMAL_SKIN_COLOR') {
       showToast('未检测到真实肤色，请上传真人照片（不支持动漫/非人像图片）');
-    } else if (error.message === 'HEAVILY_FILTERED') {
-      showToast('检测到美颜/滤镜效果过重，请上传素颜原图（关闭美颜后拍摄）');
-    } else if (error.message === 'NOT_ORIGINAL_PHOTO') {
-      showToast('检测到修图痕迹，请上传未经过后期处理的原始照片');
     } else {
       showToast('分析过程出现问题，请重试');
     }

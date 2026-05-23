@@ -84,13 +84,14 @@ async function detectFace(imageElement) {
     const hasBothEars = lm.length >= 6;
     const isProfile = !hasBothEars; // 侧脸通常缺少耳朵关键点
 
-    // 5a. 眼距与脸宽的比例（侧脸放宽到 0.08~0.70）
+    // 5a. 眼距与脸宽的比例（侧脸放宽到 0.06~0.75，正脸放宽到 0.12~0.65）
     if (lm.length >= 2) {
       const eyeDist = Math.hypot(lm[1][0] - lm[0][0], lm[1][1] - lm[0][1]);
       const eyeToFaceRatio = eyeDist / faceW;
-      const lo = isProfile ? 0.08 : 0.14;
-      const hi = isProfile ? 0.70 : 0.60;
+      const lo = isProfile ? 0.06 : 0.12;
+      const hi = isProfile ? 0.75 : 0.65;
       if (eyeToFaceRatio < lo || eyeToFaceRatio > hi) {
+        console.warn('[防作弊] 眼距比例异常:', eyeToFaceRatio.toFixed(3), 'isProfile:', isProfile);
         throw new Error('UNNATURAL_EYE_SPACING');
       }
     }
@@ -101,10 +102,11 @@ async function detectFace(imageElement) {
       const eyeMidY = (lm[0][1] + lm[1][1]) / 2;
       const eyeDist = Math.hypot(lm[1][0] - lm[0][0], lm[1][1] - lm[0][1]);
 
-      // 鼻子偏移容限：侧脸 0.6，正脸 0.3
+      // 鼻子偏移容限：侧脸 0.75，正脸 0.45（放宽，适配头部微小倾斜）
       const noseOffsetX = lm[2][0] - eyeMidX;
-      const noseTol = isProfile ? eyeDist * 0.6 : eyeDist * 0.3;
+      const noseTol = isProfile ? eyeDist * 0.75 : eyeDist * 0.45;
       if (Math.abs(noseOffsetX) > noseTol) {
+        console.warn('[防作弊] 鼻子偏移:', (noseOffsetX / eyeDist).toFixed(3), '容限:', isProfile ? '0.75' : '0.45');
         throw new Error('UNNATURAL_NOSE_POSITION');
       }
       if (lm[2][1] <= eyeMidY) {
@@ -119,18 +121,18 @@ async function detectFace(imageElement) {
       }
     }
 
-    // 5d. 对称性：仅正脸检测，侧脸跳过
+    // 5d. 对称性：仅正脸检测，侧脸跳过（放宽至 40%）
     if (!isProfile && lm.length >= 3 && lm.length >= 2) {
       const leftEyeToNose = Math.hypot(lm[0][0] - lm[2][0], lm[0][1] - lm[2][1]);
       const rightEyeToNose = Math.hypot(lm[1][0] - lm[2][0], lm[1][1] - lm[2][1]);
       const symmetryRatio = Math.min(leftEyeToNose, rightEyeToNose) / Math.max(leftEyeToNose, rightEyeToNose);
-      // 正脸对称度放宽到 50%
-      if (symmetryRatio < 0.50) {
+      if (symmetryRatio < 0.40) {
+        console.warn('[防作弊] 面部对称度:', symmetryRatio.toFixed(3));
         throw new Error('FACE_ASYMMETRY');
       }
     }
 
-    // 5e. 眼-鼻-嘴角度：侧脸放宽至 100°~179.5°
+    // 5e. 眼-鼻-嘴角度：侧脸放宽至 90°~179.5°，正脸放宽至 115°~179.5°
     if (lm.length >= 4 && lm.length >= 2) {
       const eyeMidX2 = (lm[0][0] + lm[1][0]) / 2;
       const eyeMidY2 = (lm[0][1] + lm[1][1]) / 2;
@@ -141,8 +143,9 @@ async function detectFace(imageElement) {
       if (len1 > 0 && len2 > 0) {
         const cosA = (v1[0] * v2[0] + v1[1] * v2[1]) / (len1 * len2);
         const angleDeg = Math.acos(Math.max(-1, Math.min(1, cosA))) * (180 / Math.PI);
-        const loAngle = isProfile ? 100 : 130;
+        const loAngle = isProfile ? 90 : 115;
         if (angleDeg < loAngle || angleDeg > 179.5) {
+          console.warn('[防作弊] 眼鼻嘴角度:', angleDeg.toFixed(1) + '°', 'isProfile:', isProfile);
           throw new Error('UNNATURAL_FACE_ANGLE');
         }
       }
@@ -197,6 +200,7 @@ async function verifySkinColorDistribution(imageElement, face) {
 
   // 肤色像素占比低于 12% 则可能非真人照片（放宽以适应暗光/侧脸）
   if (totalCount > 0 && skinCount / totalCount < 0.12) {
+    console.warn('[防作弊] 肤色像素占比:', (skinCount / totalCount * 100).toFixed(1) + '%');
     throw new Error('NOT_REAL_SKIN');
   }
 
@@ -209,6 +213,7 @@ async function verifySkinColorDistribution(imageElement, face) {
     const rgDiff = avgR - avgG;
     const rbDiff = avgR - avgB;
     if (rgDiff < 2 || rbDiff < 1) {
+      console.warn('[防作弊] 肤色RGB差异: R=' + avgR.toFixed(0) + ' G=' + avgG.toFixed(0) + ' B=' + avgB.toFixed(0));
       throw new Error('ABNORMAL_SKIN_COLOR');
     }
   }
@@ -262,8 +267,9 @@ async function verifyRawPhoto(imageElement, face) {
 
   if (sampleCount > 0) {
     const avgTextureVar = textureVariance / sampleCount;
-    // 美颜滤镜会大幅降低纹理方差（< 3 为高度平滑）
-    if (avgTextureVar < 2.5) {
+    // 美颜滤镜会降低纹理方差（放宽至 1.5，适配手机拍照/暗光/自带美颜）
+    if (avgTextureVar < 1.5) {
+      console.warn('[防作弊] 纹理方差过低:', avgTextureVar.toFixed(2), '（可能过度美颜）');
       throw new Error('HEAVILY_FILTERED');
     }
   }
@@ -295,12 +301,14 @@ async function verifyRawPhoto(imageElement, face) {
     const avgEla = elaSum / elaCount;
     const highElaRatio = highElaCount / elaCount;
 
-    // 全局平均 ELA 过高 → 图像被过度编辑或非原图
-    if (avgEla > 12) {
+    // 全局平均 ELA 过高 → 图像被过度编辑或非原图（放宽至 25，手机拍照/压缩自然偏高）
+    if (avgEla > 25) {
+      console.warn('[防作弊] ELA均值过高:', avgEla.toFixed(2), '（可能修图）');
       throw new Error('NOT_ORIGINAL_PHOTO');
     }
-    // 高误差区域占比过大 → 大面积修图痕迹
-    if (highElaRatio > 0.15) {
+    // 高误差区域占比过大 → 大面积修图痕迹（放宽至 0.30）
+    if (highElaRatio > 0.30) {
+      console.warn('[防作弊] 高ELA占比:', (highElaRatio * 100).toFixed(1) + '%');
       throw new Error('NOT_ORIGINAL_PHOTO');
     }
   }
@@ -329,8 +337,9 @@ async function verifyRawPhoto(imageElement, face) {
 
   if (edgeCount > 0) {
     const avgEdge = edgeEnergy / edgeCount;
-    // 美颜后边缘能量极低（磨皮消除所有纹理）
-    if (avgEdge < 8) {
+    // 美颜后边缘能量极低（磨皮消除所有纹理，放宽至 4，适配暗光/美颜）
+    if (avgEdge < 4) {
+      console.warn('[防作弊] 边缘能量过低:', avgEdge.toFixed(2));
       throw new Error('HEAVILY_FILTERED');
     }
   }
@@ -705,7 +714,7 @@ async function startAnalysis() {
     analysisInProgress = false;
     
   } catch (error) {
-    console.error('Analysis Error:', error);
+    console.error('[分析失败]', error.message, error.stack);
     overlay.classList.remove('active');
     btn.disabled = false;
     analysisInProgress = false;

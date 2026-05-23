@@ -1148,7 +1148,7 @@
             <h3>面部图像采集</h3>
             <span style="color:rgba(255,255,255,0.5);font-size:12px;margin-top:2px;display:block">请上传正面清晰面部照片</span>
           </div>
-          <span style="color:rgba(255,255,255,0.4);font-size:11px">步骤 1/4</span>
+          <span style="color:rgba(255,255,255,0.4);font-size:11px" id="step-indicator">步骤 1/4</span>
         </div>
         <div class="scan-body">
           <div class="camera-area" id="camera-area" onclick="triggerUpload()">
@@ -1331,6 +1331,9 @@ let faceDetector = null;
 let currentImageData = null;
 let scanData = null;
 let modelReady = false;
+let lastFacePrediction = null;  // 保存最近一次人脸检测结果（含关键点）
+const TOTAL_STEPS = 4;
+let currentStep = 0;
 
 // ===== Load TensorFlow.js Face Detection Model =====
 async function loadFaceModel() {
@@ -1352,20 +1355,169 @@ async function loadFaceModel() {
   }
 }
 
-// ===== Face Detection using TensorFlow.js =====
+// ===== Face Detection using TensorFlow.js (增强版：防作弊) =====
 async function detectFace(imageElement) {
   if (!faceDetector) {
     throw new Error('MODEL_NOT_READY');
   }
-  
+
   // Run face detection
   const predictions = await faceDetector.estimateFaces(imageElement, false);
-  
+
+  // --- 1. 检测人脸数量 ---
   if (predictions.length === 0) {
     throw new Error('NO_FACE_DETECTED');
   }
-  
-  return predictions[0]; // Return first face
+  if (predictions.length > 1) {
+    throw new Error('MULTIPLE_FACES');
+  }
+
+  const face = predictions[0];
+
+  // --- 2. 置信度校验 (BlazeFace 概率值) ---
+  if (face.probability && face.probability < 0.85) {
+    throw new Error('LOW_CONFIDENCE');
+  }
+
+  // --- 3. 面部尺寸校验（占画面比例至少 10%） ---
+  const imgW = imageElement.width;
+  const imgH = imageElement.height;
+  const faceW = face.bottomRight[0] - face.topLeft[0];
+  const faceH = face.bottomRight[1] - face.topLeft[1];
+  const faceArea = faceW * faceH;
+  const imgArea = imgW * imgH;
+
+  if (faceArea / imgArea < 0.08) {
+    throw new Error('FACE_TOO_SMALL');
+  }
+
+  // --- 4. 人脸宽高比校验（真实人脸约为 0.65~0.85） ---
+  const aspectRatio = faceW / faceH;
+  if (aspectRatio < 0.5 || aspectRatio > 1.0) {
+    throw new Error('INVALID_FACE_RATIO');
+  }
+
+  // --- 5. 关键点几何一致性校验（排除 AI 生成/动漫人脸） ---
+  if (face.landmarks && face.landmarks.length >= 6) {
+    const lm = face.landmarks;  // [leftEye, rightEye, nose, mouth, leftEar, rightEar]
+
+    // 5a. 眼距与脸宽的比例（真实人脸眼距约是脸宽的 28%~42%）
+    const eyeDist = Math.hypot(lm[1][0] - lm[0][0], lm[1][1] - lm[0][1]);
+    const eyeToFaceRatio = eyeDist / faceW;
+    if (eyeToFaceRatio < 0.18 || eyeToFaceRatio > 0.55) {
+      throw new Error('UNNATURAL_EYE_SPACING');
+    }
+
+    // 5b. 鼻子应在两眼之间偏下方
+    const eyeMidX = (lm[0][0] + lm[1][0]) / 2;
+    const eyeMidY = (lm[0][1] + lm[1][1]) / 2;
+    const noseOffsetX = lm[2][0] - eyeMidX;
+    // 鼻子与眼中心的水平偏移不应超过眼距的 20%
+    if (Math.abs(noseOffsetX) > eyeDist * 0.25) {
+      throw new Error('UNNATURAL_NOSE_POSITION');
+    }
+    // 鼻子应在眼睛下方（Y 坐标更大）
+    if (lm[2][1] <= eyeMidY) {
+      throw new Error('INVERTED_FACE_GEOMETRY');
+    }
+
+    // 5c. 嘴巴应在鼻子下方
+    if (lm[3][1] <= lm[2][1]) {
+      throw new Error('UNNATURAL_MOUTH_POSITION');
+    }
+
+    // 5d. 左右对称性检查
+    const leftEyeToNose = Math.hypot(lm[0][0] - lm[2][0], lm[0][1] - lm[2][1]);
+    const rightEyeToNose = Math.hypot(lm[1][0] - lm[2][0], lm[1][1] - lm[2][1]);
+    const symmetryRatio = Math.min(leftEyeToNose, rightEyeToNose) / Math.max(leftEyeToNose, rightEyeToNose);
+    // 对称性低于 70% 说明面部严重偏斜或非真人
+    if (symmetryRatio < 0.65) {
+      throw new Error('FACE_ASYMMETRY');
+    }
+
+    // 5e. 眼-鼻-嘴三角形角度校验（真人约 150°~175° 夹角）
+    const eyeCenter = [eyeMidX, eyeMidY];
+    const nosePoint = [lm[2][0], lm[2][1]];
+    const mouthPoint = [lm[3][0], lm[3][1]];
+
+    // 向量 eye→nose 和 eye→mouth
+    const v1 = [nosePoint[0] - eyeCenter[0], nosePoint[1] - eyeCenter[1]];
+    const v2 = [mouthPoint[0] - eyeCenter[0], mouthPoint[1] - eyeCenter[1]];
+    const len1 = Math.hypot(v1[0], v1[1]);
+    const len2 = Math.hypot(v2[0], v2[1]);
+
+    if (len1 > 0 && len2 > 0) {
+      const dot = v1[0] * v2[0] + v1[1] * v2[1];
+      const cosAngle = dot / (len1 * len2);
+      const angleDeg = Math.acos(Math.max(-1, Math.min(1, cosAngle))) * (180 / Math.PI);
+      // 动漫/AI 生成人脸往往鼻腔口角度异常
+      if (angleDeg < 140 || angleDeg > 178) {
+        throw new Error('UNNATURAL_FACE_ANGLE');
+      }
+    }
+  } else {
+    throw new Error('NO_LANDMARKS');
+  }
+
+  // --- 6. 肤色分布分析：用 Canvas 采样面部区域 ---
+  await verifySkinColorDistribution(imageElement, face);
+
+  // 保存检测结果供报告页绘制关键点
+  lastFacePrediction = face;
+  return face;
+}
+
+// 肤色分布校验 — 排除非真人肤色（纯白/纯黑/动漫色板）
+async function verifySkinColorDistribution(imageElement, face) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const padX = (face.bottomRight[0] - face.topLeft[0]) * 0.1;
+  const padY = (face.bottomRight[1] - face.topLeft[1]) * 0.1;
+  const sx = Math.max(0, face.topLeft[0] - padX);
+  const sy = Math.max(0, face.topLeft[1] - padY);
+  const sw = Math.min(imageElement.width - sx, face.bottomRight[0] - face.topLeft[0] + padX * 2);
+  const sh = Math.min(imageElement.height - sy, face.bottomRight[1] - face.topLeft[1] + padY * 2);
+
+  canvas.width = Math.floor(sw);
+  canvas.height = Math.floor(sh);
+  ctx.drawImage(imageElement, sx, sy, sw, sh, 0, 0, sw, sh);
+
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pixels = imgData.data;
+  let skinCount = 0;
+  let totalCount = 0;
+  let rSum = 0, gSum = 0, bSum = 0;
+
+  for (let i = 0; i < pixels.length; i += 4) {
+    const r = pixels[i];
+    const g = pixels[i + 1];
+    const b = pixels[i + 2];
+    totalCount++;
+    if (r > 50 && g > 30 && b > 20 && r > g && r > b) {
+      skinCount++;
+      rSum += r;
+      gSum += g;
+      bSum += b;
+    }
+  }
+
+  // 肤色像素占比低于 25% 则可能非真人照片
+  if (totalCount > 0 && skinCount / totalCount < 0.25) {
+    throw new Error('NOT_REAL_SKIN');
+  }
+
+  // 平均肤色异常检查 — 防止灰度图/黑白图/动漫
+  if (skinCount > 0) {
+    const avgR = rSum / skinCount;
+    const avgG = gSum / skinCount;
+    const avgB = bSum / skinCount;
+    // 动漫肤色通常 R 偏高、G/B 偏低且差值极小
+    const rgDiff = avgR - avgG;
+    const rbDiff = avgR - avgB;
+    if (rgDiff < 8 || rbDiff < 5) {
+      throw new Error('ABNORMAL_SKIN_COLOR');
+    }
+  }
 }
 
 // ===== Analyze Skin from Face Region =====
@@ -1522,6 +1674,39 @@ function isSkinColor(r, g, b) {
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
+
+  // 动态更新步骤指示器
+  if (name === 'scan') {
+    currentStep = 1;
+  } else if (name === 'report') {
+    currentStep = 3;
+  } else {
+    currentStep = 0;
+  }
+  updateStepIndicator();
+}
+
+function updateStepIndicator() {
+  const stepEl = document.getElementById('step-indicator');
+  if (!stepEl) return;
+  if (currentStep >= 1) {
+    stepEl.textContent = `步骤 ${currentStep}/${TOTAL_STEPS}`;
+    stepEl.style.display = '';
+  } else {
+    stepEl.style.display = 'none';
+  }
+}
+
+// 上传照片后切换至“正在扫描”
+function setScanningStep() {
+  currentStep = 2;
+  updateStepIndicator();
+}
+
+// 报告内切换到护理方案时，标记为步骤4
+function setPlanStep() {
+  currentStep = 4;
+  updateStepIndicator();
 }
 
 function startScan() {
@@ -1579,9 +1764,6 @@ function triggerCamera() {
       document.getElementById('camera-area').classList.add('has-image');
       document.getElementById('analyze-btn').disabled = false;
       document.getElementById('scan-status').textContent = '已拍照，点击"开始AI分析"';
-      
-      // 自动检测人脸
-      detectAndHighlight();
     };
     reader.readAsDataURL(file);
   };
@@ -1633,6 +1815,7 @@ async function startAnalysis() {
   overlay.classList.add('active');
   btn.disabled = true;
   btn.textContent = '分析中，请稍候...';
+  setScanningStep();  // 更新步骤为 2/4「AI深度扫描」
 
   try {
     // Show progress animation
@@ -1676,6 +1859,18 @@ async function startAnalysis() {
       showToast('AI模型加载中，请稍候...');
     } else if (error.message === 'NO_FACE_DETECTED') {
       showToast('未检测到人脸，请上传清晰的面部照片');
+    } else if (error.message === 'MULTIPLE_FACES') {
+      showToast('检测到多张人脸，请上传单人正面照片');
+    } else if (error.message === 'LOW_CONFIDENCE') {
+      showToast('面部识别置信度不足，请确保光线充足，面部清晰无遮挡');
+    } else if (error.message === 'FACE_TOO_SMALL') {
+      showToast('面部占比过小，请靠近镜头重新拍摄');
+    } else if (error.message === 'INVALID_FACE_RATIO') {
+      showToast('面部比例异常，请保持正面角度拍摄');
+    } else if (error.message === 'NO_LANDMARKS' || error.message === 'UNNATURAL_EYE_SPACING' || error.message === 'UNNATURAL_NOSE_POSITION' || error.message === 'INVERTED_FACE_GEOMETRY' || error.message === 'UNNATURAL_MOUTH_POSITION' || error.message === 'FACE_ASYMMETRY' || error.message === 'UNNATURAL_FACE_ANGLE') {
+      showToast('面部特征异常，请上传真人正面照片（不支持动漫/AI生成图片）');
+    } else if (error.message === 'NOT_REAL_SKIN' || error.message === 'ABNORMAL_SKIN_COLOR') {
+      showToast('未检测到真实肤色，请上传真人照片（不支持动漫/非人像图片）');
     } else {
       showToast('分析过程出现问题，请重试');
     }
@@ -1783,14 +1978,136 @@ function generateSkinData(metrics) {
   };
 }
 
+// ===== 在面部照片上绘制人脸关键点 =====
+function drawFaceWithLandmarks(photoDataUrl, facePrediction, callback) {
+  if (!photoDataUrl) { callback(photoDataUrl); return; }
+
+  const img = new Image();
+  img.onload = function() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // 画布尺寸 = 原始图片尺寸
+    canvas.width = img.width;
+    canvas.height = img.height;
+
+    // 绘制原始照片
+    ctx.drawImage(img, 0, 0, img.width, img.height);
+
+    // 如果有检测结果，叠加绘制人脸关键点
+    if (facePrediction && facePrediction.landmarks && facePrediction.landmarks.length >= 6) {
+      const lm = facePrediction.landmarks;
+      // lm: [leftEye, rightEye, nose, mouth, leftEar, rightEar]
+
+      // 绘制人脸包围框（半透金色）
+      const bbox = {
+        x: facePrediction.topLeft[0],
+        y: facePrediction.topLeft[1],
+        w: facePrediction.bottomRight[0] - facePrediction.topLeft[0],
+        h: facePrediction.bottomRight[1] - facePrediction.topLeft[1]
+      };
+
+      ctx.strokeStyle = 'rgba(201,168,76,0.7)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(bbox.x, bbox.y, bbox.w, bbox.h);
+      ctx.setLineDash([]);
+
+      // 关键点绘制样式
+      const keypointColors = [
+        '#3b82f6',   // 左眼 - 蓝
+        '#3b82f6',   // 右眼 - 蓝
+        '#10b981',   // 鼻子 - 绿
+        '#ef4444',   // 嘴巴 - 红
+        '#f59e0b',   // 左耳 - 橙
+        '#f59e0b'    // 右耳 - 橙
+      ];
+
+      const keypointLabels = ['左眼', '右眼', '鼻尖', '嘴角', '左耳', '右耳'];
+
+      // 先绘制连线（眼-鼻-嘴结构线）
+      ctx.strokeStyle = 'rgba(201,168,76,0.4)';
+      ctx.lineWidth = 1.5;
+
+      const connections = [
+        [0, 2], [1, 2],  // 双眼→鼻尖
+        [2, 3],           // 鼻尖→嘴角
+        [0, 4], [1, 5],   // 双眼→耳朵
+      ];
+      connections.forEach(([a, b]) => {
+        ctx.beginPath();
+        ctx.moveTo(lm[a][0], lm[a][1]);
+        ctx.lineTo(lm[b][0], lm[b][1]);
+        ctx.stroke();
+      });
+
+      // 绘制关键点圆点及标签
+      lm.forEach((pt, i) => {
+        const x = pt[0];
+        const y = pt[1];
+
+        // 外圈光晕
+        ctx.beginPath();
+        ctx.arc(x, y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fill();
+
+        // 内圈实心点
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = keypointColors[i];
+        ctx.fill();
+
+        // 白色描边
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        // 标签文字
+        const labelOffsetY = (i === 2) ? 18 : -14; // 鼻子标签放下方
+        ctx.font = 'bold 11px "PingFang SC","Microsoft YaHei",sans-serif';
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+        ctx.lineWidth = 3;
+        ctx.textAlign = 'center';
+        ctx.strokeText(keypointLabels[i], x, y + labelOffsetY);
+        ctx.fillText(keypointLabels[i], x, y + labelOffsetY);
+      });
+
+      // 图例
+      const legendY = canvas.height - 30;
+      ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      ctx.lineWidth = 3;
+      ctx.textAlign = 'right';
+      const legendText = '🔍 AI 人脸关键点已标定';
+      ctx.strokeText(legendText, canvas.width - 16, legendY);
+      ctx.fillText(legendText, canvas.width - 16, legendY);
+    }
+
+    // 输出为 dataURL
+    callback(canvas.toDataURL('image/jpeg', 0.92));
+  };
+  img.onerror = function() {
+    callback(photoDataUrl); // 图片加载失败时回退到原始照片
+  };
+  img.src = photoDataUrl;
+}
+
 // ===== Render Report =====
 function renderReport() {
   const d = scanData;
 
   // Report ID
   document.getElementById('report-id').textContent = d.id;
-  document.getElementById('report-face').src = d.photo;
-  
+
+  // ---- 用 Canvas 绘制含人脸关键点的面部照片 ----
+  const faceImgEl = document.getElementById('report-face');
+  drawFaceWithLandmarks(d.photo, lastFacePrediction, function(dataUrl) {
+    faceImgEl.src = dataUrl;
+  });
+
   // 评估时间（当前时间）
   const now = new Date();
   const timeStr = now.getFullYear() + '-' + 
@@ -1914,6 +2231,7 @@ function switchTab(el, tabId) {
   document.querySelectorAll('.rec-content').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
   document.getElementById(tabId).classList.add('active');
+  setPlanStep();  // 切换到护理方案时步骤=4「专属方案」
 }
 
 // ===== Number Animation =====
@@ -2173,12 +2491,15 @@ function showToast(message) {
 function resetDemo() {
   currentImageData = null;
   scanData = null;
+  lastFacePrediction = null;
+  currentStep = 0;
   document.getElementById('preview-img').src = '';
   document.getElementById('preview-img').style.display = 'none';
   document.getElementById('camera-area').classList.remove('has-image');
   document.getElementById('analyze-btn').disabled = true;
   document.getElementById('analyze-btn').innerHTML = `<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg> 开始AI分析`;
   document.getElementById('scan-progress-bar').style.width = '0%';
+  updateStepIndicator();
   showPage('welcome');
 }
 

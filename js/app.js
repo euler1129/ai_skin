@@ -967,8 +967,18 @@ function renderReport() {
   // Before/After — 6 维度对比
   const compEl = document.getElementById('compare-timeline');
   compEl.innerHTML = d.compares.map(c => {
-    const unit = c.better === 'lower' ? '↓' : c.better === 'higher' ? '↑' : '→';
-    const improved = c.better === 'lower' ? c.after < c.before : c.after > c.before;
+    let unit, improved;
+    if (c.better === 'balanced') {
+      // 油脂等指标：趋向平衡值 50 为佳
+      unit = c.before > 52 ? '↓' : c.before < 48 ? '↑' : '→';
+      improved = Math.abs(c.after - 50) < Math.abs(c.before - 50);
+    } else if (c.better === 'lower') {
+      unit = '↓';
+      improved = c.after < c.before;
+    } else {
+      unit = '↑';
+      improved = c.after > c.before;
+    }
     const afterColor = improved ? 'var(--success)' : 'var(--text-muted)';
     return `
     <div class="compare-item">

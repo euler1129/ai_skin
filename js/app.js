@@ -759,7 +759,7 @@ function generateSkinData(metrics) {
   // 改善效果：展示6个维度，改善前=当前实测值，改善后=预期护理后趋向健康值
   const compares = [
     { dim: '水分含量', before: Math.round(metrics.moisture),    after: Math.round(Math.min(92, metrics.moisture + 15)),         better: 'higher' },
-    { dim: '油脂分泌', before: Math.round(metrics.oil),         after: Math.round(Math.max(35, Math.min(65, 50 + (metrics.oil - 50) * 0.4))), better: 'balanced' },
+    { dim: '油脂分泌', before: Math.round(metrics.oil),         after: Math.round(Math.max(32, metrics.oil - 14)),             better: 'lower' },
     { dim: '毛孔状态', before: Math.round(metrics.pore),        after: Math.round(Math.max(22, metrics.pore - 18)),             better: 'lower' },
     { dim: '色素沉着', before: Math.round(metrics.pigment),     after: Math.round(Math.max(18, metrics.pigment - 20)),          better: 'lower' },
     { dim: '皱纹细纹', before: Math.round(metrics.wrinkle),     after: Math.round(Math.max(18, metrics.wrinkle - 15)),          better: 'lower' },

@@ -756,10 +756,14 @@ function generateSkinData(metrics) {
     { emoji: '👁️', name: '视黄醇抗皱眼霜', effect: '0.025%视黄醇，改善眼周细纹' },
   ];
 
+  // 改善效果：展示6个维度，改善前=当前实测值，改善后=预期护理后趋向健康值
   const compares = [
-    { dim: '水分含量', before: Math.max(30, metrics.moisture - 15), after: Math.min(90, metrics.moisture + 15) },
-    { dim: '油脂分泌', before: Math.min(90, metrics.oil + 12), after: Math.max(30, metrics.oil - 12) },
-    { dim: '敏感程度', before: Math.min(80, metrics.sensitive + 10), after: Math.max(20, metrics.sensitive - 10) },
+    { dim: '水分含量', before: Math.round(metrics.moisture),    after: Math.round(Math.min(92, metrics.moisture + 15)),         better: 'higher' },
+    { dim: '油脂分泌', before: Math.round(metrics.oil),         after: Math.round(Math.max(35, Math.min(65, 50 + (metrics.oil - 50) * 0.4))), better: 'balanced' },
+    { dim: '毛孔状态', before: Math.round(metrics.pore),        after: Math.round(Math.max(22, metrics.pore - 18)),             better: 'lower' },
+    { dim: '色素沉着', before: Math.round(metrics.pigment),     after: Math.round(Math.max(18, metrics.pigment - 20)),          better: 'lower' },
+    { dim: '皱纹细纹', before: Math.round(metrics.wrinkle),     after: Math.round(Math.max(18, metrics.wrinkle - 15)),          better: 'lower' },
+    { dim: '敏感程度', before: Math.round(metrics.sensitive),   after: Math.round(Math.max(18, metrics.sensitive - 14)),        better: 'lower' },
   ];
 
   return {
@@ -1012,17 +1016,22 @@ function renderReport() {
     </div>
   `).join('');
 
-  // Before/After
+  // Before/After — 6 维度对比
   const compEl = document.getElementById('compare-timeline');
-  compEl.innerHTML = d.compares.map(c => `
+  compEl.innerHTML = d.compares.map(c => {
+    const unit = c.better === 'lower' ? '↓' : c.better === 'higher' ? '↑' : '→';
+    const improved = c.better === 'lower' ? c.after < c.before : c.after > c.before;
+    const afterColor = improved ? 'var(--success)' : 'var(--text-muted)';
+    return `
     <div class="compare-item">
       <div class="compare-badge before">改善前</div>
       <div class="compare-desc">${c.dim}：${c.before}</div>
       <span style="color:var(--text-muted);font-size:12px">→</span>
-      <div class="compare-desc" style="font-weight:700;color:var(--success)">${c.after}</div>
+      <div class="compare-desc" style="font-weight:700;color:${afterColor}">${c.after} ${unit}</div>
       <div class="compare-badge after">预计</div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 // ===== Tabs =====

@@ -208,9 +208,6 @@ body{font-family:'PingFang SC','Microsoft YaHei','Helvetica Neue',sans-serif;bac
                     综合肤质评分
                     <strong id="score-text">分析中...</strong>
                   </div>
-                  <div style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:center;opacity:0.7;">
-                    ⚠️ AI 估算，仅供参考，非医疗诊断
-                  </div>
                 </div>
                 <div class="dimension-bars" id="dimension-bars">
                   <!-- Filled by JS -->
@@ -282,6 +279,9 @@ body{font-family:'PingFang SC','Microsoft YaHei','Helvetica Neue',sans-serif;bac
         </div>
       </div>
 
+      <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--text-muted);opacity:0.6;">
+        ⚠️ 本报告由 AI 自动生成，仅供参考及娱乐，不构成医疗诊断依据
+      </div>
       <div class="reset-link" style="margin-top:24px">
         <button onclick="resetDemo()">← 重新检测</button>
       </div>

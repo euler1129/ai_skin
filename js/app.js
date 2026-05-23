@@ -776,7 +776,7 @@ function generateSkinData(metrics) {
   };
 }
 
-// ===== 在面部照片上绘制人脸关键点 =====
+// ===== 在面部照片上绘制人脸轮廓虚线 =====
 function drawFaceWithLandmarks(photoDataUrl, facePrediction, callback) {
   if (!photoDataUrl) { callback(photoDataUrl); return; }
 
@@ -795,96 +795,44 @@ function drawFaceWithLandmarks(photoDataUrl, facePrediction, callback) {
     // 绘制原始照片
     ctx.drawImage(img, 0, 0, img.width, img.height);
 
-    // 如果有检测结果，叠加绘制人脸关键点
+    // 绘制人脸轮廓虚线（基于关键点拟合的椭圆形轮廓）
     if (facePrediction && facePrediction.landmarks && facePrediction.landmarks.length >= 6) {
       const lm = facePrediction.landmarks;
       // lm: [leftEye, rightEye, nose, mouth, leftEar, rightEar]
 
-      // 绘制人脸包围框（半透金色）
-      const bbox = {
-        x: facePrediction.topLeft[0],
-        y: facePrediction.topLeft[1],
-        w: facePrediction.bottomRight[0] - facePrediction.topLeft[0],
-        h: facePrediction.bottomRight[1] - facePrediction.topLeft[1]
-      };
+      const lEye = lm[0], rEye = lm[1], nose = lm[2], mouth = lm[3], lEar = lm[4], rEar = lm[5];
 
-      ctx.strokeStyle = 'rgba(201,168,76,0.7)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(bbox.x, bbox.y, bbox.w, bbox.h);
+      // 计算轮廓参考点
+      const faceCenterX = (lEye[0] + rEye[0]) / 2;
+      const eyeToChin = Math.abs(mouth[1] - lEye[1]) * 0.5; // 下巴延伸
+      const chinY = mouth[1] + eyeToChin;
+      const foreheadY = Math.max(lEar[1], rEar[1]) - (mouth[1] - lEye[1]) * 1.2;
+      const faceHalfW = Math.abs(rEar[0] - lEar[0]) * 0.55;
+
+      // 控制点
+      const topCx = faceCenterX;
+      const botCx = faceCenterX;
+      const leftCx = lEar[0] + faceHalfW * 0.15;
+      const rightCx = rEar[0] - faceHalfW * 0.15;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(201,168,76,0.65)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([10, 6]);
+      ctx.beginPath();
+
+      // 从左耳→额头左侧→额头中间→额头右侧→右耳（上半部分）
+      ctx.moveTo(lEar[0], lEar[1]);
+      ctx.bezierCurveTo(lEar[0], foreheadY, leftCx, foreheadY, topCx, foreheadY);
+      ctx.bezierCurveTo(rightCx, foreheadY, rEar[0], foreheadY, rEar[0], rEar[1]);
+
+      // 从右耳→右下颌→下巴→左下颌→左耳（下半部分）
+      ctx.bezierCurveTo(rEar[0], chinY, nose[0] + faceHalfW * 0.6, chinY, botCx, chinY + eyeToChin * 0.3);
+      ctx.bezierCurveTo(nose[0] - faceHalfW * 0.6, chinY, lEar[0], chinY, lEar[0], lEar[1]);
+
+      ctx.stroke();
       ctx.setLineDash([]);
-
-      // 关键点绘制样式
-      const keypointColors = [
-        '#3b82f6',   // 左眼 - 蓝
-        '#3b82f6',   // 右眼 - 蓝
-        '#10b981',   // 鼻子 - 绿
-        '#ef4444',   // 嘴巴 - 红
-        '#f59e0b',   // 左耳 - 橙
-        '#f59e0b'    // 右耳 - 橙
-      ];
-
-      const keypointLabels = ['左眼', '右眼', '鼻尖', '嘴角', '左耳', '右耳'];
-
-      // 先绘制连线（眼-鼻-嘴结构线）
-      ctx.strokeStyle = 'rgba(201,168,76,0.4)';
-      ctx.lineWidth = 1.5;
-
-      const connections = [
-        [0, 2], [1, 2],  // 双眼→鼻尖
-        [2, 3],           // 鼻尖→嘴角
-        [0, 4], [1, 5],   // 双眼→耳朵
-      ];
-      connections.forEach(([a, b]) => {
-        ctx.beginPath();
-        ctx.moveTo(lm[a][0], lm[a][1]);
-        ctx.lineTo(lm[b][0], lm[b][1]);
-        ctx.stroke();
-      });
-
-      // 绘制关键点圆点及标签
-      lm.forEach((pt, i) => {
-        const x = pt[0];
-        const y = pt[1];
-
-        // 外圈光晕
-        ctx.beginPath();
-        ctx.arc(x, y, 7, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fill();
-
-        // 内圈实心点
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = keypointColors[i];
-        ctx.fill();
-
-        // 白色描边
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.2;
-        ctx.stroke();
-
-        // 标签文字
-        const labelOffsetY = (i === 2) ? 18 : -14; // 鼻子标签放下方
-        ctx.font = 'bold 11px "PingFang SC","Microsoft YaHei",sans-serif';
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-        ctx.lineWidth = 3;
-        ctx.textAlign = 'center';
-        ctx.strokeText(keypointLabels[i], x, y + labelOffsetY);
-        ctx.fillText(keypointLabels[i], x, y + labelOffsetY);
-      });
-
-      // 图例
-      const legendY = canvas.height - 30;
-      ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-      ctx.lineWidth = 3;
-      ctx.textAlign = 'right';
-      const legendText = '🔍 AI 人脸关键点已标定';
-      ctx.strokeText(legendText, canvas.width - 16, legendY);
-      ctx.fillText(legendText, canvas.width - 16, legendY);
+      ctx.restore();
     }
 
     // 输出为 dataURL
